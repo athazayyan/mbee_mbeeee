@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	apidocs "kitakarsa.com/tenantku/backend/api"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
@@ -31,6 +32,7 @@ func run(ctx context.Context) error {
 	}
 
 	router := gin.Default()
+	apidocs.Routes(router)
 	if err := router.SetTrustedProxies(nil); err != nil {
 		return err
 	}
