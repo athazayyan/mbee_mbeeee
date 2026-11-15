@@ -2141,6 +2141,1074 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/opportunity:
+    get:
+      tags: [Analisis]
+      operationId: getOpportunity
+      summary: '[Rencana] Baca analisis peluang'
+      description: Tenant atau organizer scoped. Cohort di bawah ambang dikembalikan sebagai limited tanpa angka omzet.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: category_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+      - name: city
+        in: query
+        required: false
+        schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Opportunity'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /calculators/break-even:
+    post:
+      tags: [Analisis]
+      operationId: calculateBreakEven
+      summary: '[Rencana] Hitung titik impas'
+      description: Publik dengan rate limit. Bila margin tidak positif, hasil target impas bernilai null. Nilai adalah estimasi.
+      x-implementation-status: planned
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BreakEvenInput'}
+            example:
+              fixed_cost: 1200000
+              unit_price: 20000
+              variable_cost_per_unit: 12000
+              estimated_units: 150
+              selling_days: 3
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/BreakEvenResult'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /events/{id}/reports:
+    get:
+      tags: [Analisis]
+      operationId: getEventReport
+      summary: '[Rencana] Baca laporan agregat acara'
+      description: Pemilik acara. Terapkan batas agrégasi dan persetujuan data sebelum menyajikan metrik.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: from
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - name: block_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/EventReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /contracts:
+    post:
+      tags: [Kontrak dan tagihan]
+      operationId: createContract
+      summary: '[Rencana] Buat kontrak draft'
+      description: Penyelenggara berizin. Mode menentukan komponen harga yang wajib.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContractInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Contract'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /contracts/{id}/accept:
+    post:
+      tags: [Kontrak dan tagihan]
+      operationId: acceptContract
+      summary: '[Rencana] Terima versi kontrak'
+      description: Pihak terdaftar menyetujui versi tepat. Penerimaan berulang untuk pihak dan versi yang sama tidak digandakan.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ContractAcceptance'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Contract'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /contracts/{id}/invoices:
+    get:
+      tags: [Kontrak dan tagihan]
+      operationId: listInvoices
+      summary: '[Rencana] Daftar tagihan kontrak'
+      description: Hanya pihak kontrak.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, minLength: 1}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Invoice'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /invoices/{id}/payments:
+    post:
+      tags: [Kontrak dan tagihan]
+      operationId: createInvoicePayment
+      summary: '[Rencana] Buat pembayaran tagihan'
+      description: Pihak pembayar. Nominal dari tagihan atau jumlah parsial yang diizinkan.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/InvoicePaymentInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentAttempt'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Fitur atau dependensi belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/reports:
+    post:
+      tags: [Rapor usaha]
+      operationId: requestBusinessReport
+      summary: '[Rencana] Jadwalkan pembuatan rapor'
+      description: Pemilik usaha. Rapor memakai snapshot periode dan cutoff server.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BusinessReportInput'}
+      responses:
+        '202':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Job'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /jobs/{id}:
+    get:
+      tags: [Rapor usaha]
+      operationId: getJob
+      summary: '[Rencana] Baca status job'
+      description: Pemilik job; output tersedia bila job sukses.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Job'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /reports/{id}/shares:
+    post:
+      tags: [Rapor usaha]
+      operationId: createReportShare
+      summary: '[Rencana] Buat tautan berbagi rapor'
+      description: Pemilik rapor. Tautan memberikan akses berbatas waktu kepada pemegang token.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReportShareInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ReportShare'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /report-shares/{id}:
+    delete:
+      tags: [Rapor usaha]
+      operationId: revokeReportShare
+      summary: '[Rencana] Cabut tautan rapor'
+      description: Pemilik rapor. Token tidak lagi berlaku setelah dicabut.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Berhasil tanpa isi respons
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /public/reports/{token}:
+    get:
+      tags: [Rapor usaha]
+      operationId: getSharedReport
+      summary: '[Rencana] Baca rapor berbagi'
+      description: Pemegang token masih berlaku. Token kedaluwarsa atau dicabut memberi 404.
+      x-implementation-status: planned
+      security: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PublicReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+          headers:
+            Cache-Control:
+              description: Selalu no-store.
+              schema: {type: string, enum: [no-store]}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /conversations/{id}/messages:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listMessages
+      summary: '[Rencana] Baca pesan percakapan'
+      description: Hanya anggota percakapan.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Message'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: sendMessage
+      summary: '[Rencana] Kirim pesan'
+      description: Hanya anggota. Gunakan client_message_id yang sama saat retry.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Message'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/reviews:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: createReview
+      summary: '[Rencana] Beri ulasan booking'
+      description: Hanya pihak booking yang memenuhi syarat. Satu ulasan per pihak.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ResourceStatus'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /notifications:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listNotifications
+      summary: '[Rencana] Baca inbox notifikasi'
+      description: Hanya notifikasi pemilik sesi.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: unread
+        in: query
+        required: false
+        schema: {type: boolean}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Notification'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /uploads/presign:
+    post:
+      tags: [Unggahan]
+      operationId: presignUpload
+      summary: '[Rencana] Buat upload intent'
+      description: Scope, MIME, dan ukuran divalidasi server sebelum mengeluarkan URL bertenggat.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PresignInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/UploadIntent'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413':
+          description: Ukuran request melebihi batas
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '415':
+          description: Tipe konten tidak didukung
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /uploads/complete:
+    post:
+      tags: [Unggahan]
+      operationId: completeUpload
+      summary: '[Rencana] Selesaikan unggahan'
+      description: Pemilik intent. Periksa objek asli, ukuran, tipe, dan status pemeriksaan konten.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CompleteUploadInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/UploadStatus'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/audit:
+    get:
+      tags: [Admin]
+      operationId: listAuditEvents
+      summary: '[Rencana] Baca log audit'
+      description: Admin berizin. Filter tidak mengungkap secret.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: actor_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+      - name: action
+        in: query
+        required: false
+        schema: {type: string, minLength: 1}
+      - name: from
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AuditEvent'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payment-exceptions:
+    get:
+      tags: [Admin]
+      operationId: listPaymentExceptions
+      summary: '[Rencana] Baca pengecualian pembayaran'
+      description: 'Admin berizin. Contoh: pembayaran masuk setelah hold berakhir.'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [open, investigating, closed]}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/PaymentException'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/settings/{key}:
+    put:
+      tags: [Admin]
+      operationId: publishSettingVersion
+      summary: '[Rencana] Tetapkan versi konfigurasi'
+      description: Admin berizin. Skema value mengikuti setting yang diizinkan. Perubahan finansial berlaku prospektif.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: key
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SettingInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/SettingVersion'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     AccessCookie:
@@ -2747,6 +3815,239 @@ components:
         occurred_at: {type: string, format: date-time}
         note: {type: string, minLength: 1}
         event_id: {type: string, format: uuid}
+    SampleSize:
+      type: object
+      required: [tenants, events]
+      properties:
+        tenants: {type: integer, minimum: 0}
+        events: {type: integer, minimum: 0}
+    Opportunity:
+      type: object
+      required: [status, sample_size]
+      properties:
+        status: {type: string, enum: [available, limited]}
+        sample_size: {$ref: '#/components/schemas/SampleSize'}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        source_categories: {type: array, items: {type: string, enum: [pos, self_reported]}}
+        median_daily_sales: {$ref: '#/components/schemas/Rupiah'}
+        p25_daily_sales: {$ref: '#/components/schemas/Rupiah'}
+        p75_daily_sales: {$ref: '#/components/schemas/Rupiah'}
+    BreakEvenInput:
+      type: object
+      required: [fixed_cost, unit_price, variable_cost_per_unit, estimated_units, selling_days]
+      properties:
+        fixed_cost: {$ref: '#/components/schemas/Rupiah'}
+        unit_price: {type: integer, minimum: 1}
+        variable_cost_per_unit: {$ref: '#/components/schemas/Rupiah'}
+        estimated_units: {type: integer, minimum: 0}
+        selling_days: {type: integer, minimum: 1}
+    BreakEvenResult:
+      type: object
+      required: [status, contribution_margin, estimated_profit]
+      properties:
+        status: {type: string, enum: [reachable, unreachable]}
+        contribution_margin: {type: integer}
+        estimated_profit: {type: integer}
+        units_at_break_even: {type: [integer, 'null'], minimum: 0}
+        revenue_at_break_even: {type: [integer, 'null'], minimum: 0}
+        daily_unit_target: {type: [integer, 'null'], minimum: 0}
+    EventReport:
+      type: object
+      required: [event_id, confirmed_stands, active_stands]
+      properties:
+        event_id: {type: string, format: uuid}
+        confirmed_stands: {type: integer, minimum: 0}
+        active_stands: {type: integer, minimum: 0}
+        occupancy_bps: {$ref: '#/components/schemas/BasisPoints'}
+        cohort: {$ref: '#/components/schemas/Opportunity'}
+    Contract:
+      type: object
+      required: [id, version, status, organization_id, business_id, unit_id, mode]
+      properties:
+        id: {type: string, format: uuid}
+        version: {type: integer, minimum: 1}
+        status: {type: string, enum: [draft, pending, active, ended, cancelled]}
+        organization_id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        unit_id: {type: string, format: uuid}
+        starts_on: {type: string, format: date}
+        ends_on: {type: string, format: date}
+        timezone: {type: string, minLength: 1}
+        mode: {type: string, enum: [fixed, revenue_share, hybrid]}
+        fixed_rent: {$ref: '#/components/schemas/Rupiah'}
+        revenue_share_bps: {$ref: '#/components/schemas/BasisPoints'}
+        deposit: {$ref: '#/components/schemas/Rupiah'}
+        terms: {type: string, minLength: 1}
+    ContractInput:
+      type: object
+      required: [organization_id, business_id, unit_id, starts_on, ends_on, timezone, mode, terms]
+      properties:
+        organization_id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        unit_id: {type: string, format: uuid}
+        starts_on: {type: string, format: date}
+        ends_on: {type: string, format: date}
+        timezone: {type: string, minLength: 1}
+        mode: {type: string, enum: [fixed, revenue_share, hybrid]}
+        fixed_rent: {$ref: '#/components/schemas/Rupiah'}
+        revenue_share_bps: {$ref: '#/components/schemas/BasisPoints'}
+        deposit: {$ref: '#/components/schemas/Rupiah'}
+        terms: {type: string, minLength: 1}
+    ContractAcceptance:
+      type: object
+      required: [version]
+      properties:
+        version: {type: integer, minimum: 1}
+    Invoice:
+      type: object
+      required: [id, contract_id, status, period_start, period_end, total, due_at]
+      properties:
+        id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        status: {type: string, enum: [draft, unpaid, partially_paid, paid, overdue, void]}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        total: {$ref: '#/components/schemas/Rupiah'}
+        due_at: {type: string, format: date-time}
+        cutoff_at: {type: string, format: date-time}
+    InvoicePaymentInput:
+      type: object
+      required: [method]
+      properties:
+        method: {type: string, minLength: 1}
+        amount: {$ref: '#/components/schemas/Rupiah'}
+    Job:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id: {type: string, format: uuid}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        report_id: {type: string, format: uuid}
+        error_code: {type: string, minLength: 1}
+    BusinessReportInput:
+      type: object
+      required: [period_start, period_end]
+      properties:
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        event_id: {type: string, format: uuid}
+    ReportShare:
+      type: object
+      required: [id, url, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, format: uri}
+        expires_at: {type: string, format: date-time}
+    ReportShareInput:
+      type: object
+      properties:
+        expires_at: {type: string, format: date-time}
+        scope: {type: string, enum: [summary]}
+    PublicReport:
+      type: object
+      required: [period_start, period_end, generated_at, verification_status]
+      properties:
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        generated_at: {type: string, format: date-time}
+        verification_status: {type: string, enum: [third_party_unverified]}
+        net_sales: {$ref: '#/components/schemas/Rupiah'}
+        transaction_count: {type: integer, minimum: 0}
+        completeness_note: {type: string, minLength: 1}
+    Message:
+      type: object
+      required: [id, client_message_id, sender_id, text, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        client_message_id: {type: string, format: uuid}
+        text: {type: string, minLength: 1, maxLength: 4000}
+        sender_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+    MessageInput:
+      type: object
+      required: [client_message_id, text]
+      properties:
+        client_message_id: {type: string, format: uuid}
+        text: {type: string, minLength: 1, maxLength: 4000}
+    ReviewInput:
+      type: object
+      required: [rating]
+      properties:
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string, maxLength: 2000}
+    Notification:
+      type: object
+      required: [id, kind, title, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, minLength: 1}
+        title: {type: string, minLength: 1}
+        message: {type: string, minLength: 1}
+        created_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+    PresignInput:
+      type: object
+      required: [purpose, content_type, size_bytes]
+      properties:
+        purpose: {type: string, enum: [event_banner, product_photo, dispute_evidence]}
+        content_type: {type: string, minLength: 1}
+        size_bytes: {type: integer, minimum: 1}
+    UploadIntent:
+      type: object
+      required: [upload_id, url, method, headers, expires_at]
+      properties:
+        upload_id: {type: string, format: uuid}
+        url: {type: string, format: uri}
+        method: {type: string, enum: [PUT]}
+        headers: {type: object, additionalProperties: {type: string}}
+        expires_at: {type: string, format: date-time}
+    CompleteUploadInput:
+      type: object
+      required: [upload_id]
+      properties:
+        upload_id: {type: string, format: uuid}
+    UploadStatus:
+      type: object
+      required: [upload_id, status]
+      properties:
+        upload_id: {type: string, format: uuid}
+        status: {type: string, enum: [pending_scan, ready, rejected]}
+    AuditEvent:
+      type: object
+      required: [id, action, occurred_at, request_id]
+      properties:
+        id: {type: string, format: uuid}
+        actor_id: {type: string, format: uuid}
+        action: {type: string, minLength: 1}
+        resource_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 1}
+        occurred_at: {type: string, format: date-time}
+        request_id: {type: string, format: uuid}
+    PaymentException:
+      type: object
+      required: [id, payment_id, code, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        payment_id: {type: string, format: uuid}
+        booking_id: {type: string, format: uuid}
+        code: {type: string, minLength: 1}
+        status: {type: string, enum: [open, investigating, closed]}
+        created_at: {type: string, format: date-time}
+    SettingInput:
+      type: object
+      required: [value, effective_at, reason]
+      properties:
+        value: {description: Nilai dengan skema yang ditentukan oleh key.}
+        effective_at: {type: string, format: date-time}
+        reason: {type: string, minLength: 1}
+    SettingVersion:
+      type: object
+      required: [key, version, effective_at]
+      properties:
+        key: {type: string, minLength: 1}
+        version: {type: integer, minimum: 1}
+        effective_at: {type: string, format: date-time}
   parameters:
     Cursor:
       name: cursor
@@ -2786,3 +4087,15 @@ tags:
   description: Pembayaran, webhook, check-in, refund dan sengketa.
 - name: Produk dan kasir
   description: Katalog, sesi kasir, transaksi dan sinkronisasi offline.
+- name: Analisis
+  description: Kalkulator impas dan agregat dengan batas privasi.
+- name: Kontrak dan tagihan
+  description: Kontrak sewa jangka panjang, versi, invoice dan pembayaran.
+- name: Rapor usaha
+  description: Generate rapor, status job, dan tautan berbagi terbatas.
+- name: Pesan, ulasan, dan notifikasi
+  description: Komunikasi sesuai membership serta inbox pemilik.
+- name: Unggahan
+  description: Upload intent, verifikasi konten dan penyelesaian.
+- name: Admin
+  description: Audit, pengecualian pembayaran dan konfigurasi berversi.
