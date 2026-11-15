@@ -5,7 +5,7 @@ Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan sa
 ## Prasyarat
 
 - Go 1.26.10 sesuai `go.mod`, `make`, dan `openssl`.
-- PostgreSQL untuk development. Workflow CI menggunakan PostgreSQL 17.
+- PostgreSQL untuk development. Contoh setup di bawah menggunakan PostgreSQL 17.
 - Frontend TenantKu untuk mencoba alur akun dari browser. Ikuti [README Frontend](https://github.com/M-Aidil-Fitrah/mbee_fe/blob/aidil/README.md).
 
 ## Setup lokal
