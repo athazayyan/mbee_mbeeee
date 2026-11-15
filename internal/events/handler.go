@@ -64,6 +64,7 @@ func existing[T any](input *T, current T) T {
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/organizations/:id/events", sessions.WithAccount(s.listEvents))
 	api.GET("/organizations/:id/events/:event_id", sessions.WithAccount(s.getEvent))
+	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -72,6 +73,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.PATCH("/events/:id", sessions.WithAccount(s.updateEvent))
 	mutations.POST("/events/:id/duplicate", sessions.WithAccount(s.duplicateEvent))
 	mutations.POST("/events/:id/cancel", sessions.WithAccount(s.cancelEvent))
+	mutations.PUT("/events/:id/pricing", sessions.WithAccount(s.replacePricing))
+	mutations.POST("/events/:id/pricing/preview", sessions.WithAccount(s.previewPrice))
 }
 
 func (s Store) listEvents(c *gin.Context, account auth.Account) {

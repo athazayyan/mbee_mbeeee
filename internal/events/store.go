@@ -35,7 +35,7 @@ type event struct {
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM events, event_slots, event_status_history LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT 1 FROM events, event_slots, event_status_history, event_pricing_versions LIMIT 0`)
 	return err
 }
 

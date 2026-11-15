@@ -1060,12 +1060,36 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
   /events/{id}/pricing:
+    get:
+      tags: [Denah dan harga]
+      operationId: getPricing
+      summary: Baca konfigurasi harga acara
+      description: Anggota organisasi dapat membaca slot, versi aktif, dan versi terakhir disimpan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      responses:
+        '200':
+          description: Konfigurasi harga privat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PricingState'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     put:
       tags: [Denah dan harga]
       operationId: replacePricing
-      summary: '[Rencana] Tetapkan versi aturan harga'
-      description: Tier memakai okupansi confirmed. Harga hold aktif tetap memakai snapshot.
-      x-implementation-status: planned
+      summary: Tetapkan versi aturan harga draft
+      description: Saat ini mendukung harga dasar acara dan slot, tier, batas harga, serta kuota kategori tingkat acara. Harga per stand/blok dan pemakaian kuota saat booking mengikuti integrasi E05/E06. Setiap penyimpanan membuat revisi, dengan waktu server sebagai default effective_at.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1114,6 +1138,38 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /events/{id}/pricing/preview:
+    post:
+      tags: [Denah dan harga]
+      operationId: previewPricing
+      summary: Simulasikan harga sewa
+      description: Pemilik organisasi mengirim aturan dan skenario okupansi hipotetis untuk satu slot. Hasil dibulatkan ke rupiah penuh sebelum penerapan floor/cap. Simulasi tidak menyimpan aturan, menggunakan kapasitas riil, atau memasukkan biaya transaksi.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PricingPreviewInput'}
+      responses:
+        '200':
+          description: Simulasi sewa satu slot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PricingQuote'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /events/{id}/applications:
     post:
@@ -3853,31 +3909,87 @@ components:
       required: [occupancy_bps, multiplier_bps]
       properties:
         occupancy_bps: {$ref: '#/components/schemas/BasisPoints'}
-        multiplier_bps: {type: integer, minimum: 1}
+        multiplier_bps: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
     CategoryQuota:
       type: object
       required: [category_id, cap]
       properties:
         category_id: {type: string, format: uuid}
         block_id: {type: string, format: uuid}
-        cap: {type: integer, minimum: 0}
-    PricingInput:
+        cap: {type: integer, format: int32, minimum: 0, maximum: 2147483647}
+    PricingRupiah:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 9007199254740991
+    SlotPrice:
       type: object
-      required: [stand_prices, block_prices]
+      required: [event_slot_id, base_price]
       properties:
-        stand_prices: {type: array, items: {$ref: '#/components/schemas/StandPrice'}}
-        block_prices: {type: array, items: {$ref: '#/components/schemas/BlockPrice'}}
+        event_slot_id: {type: string, format: uuid}
+        base_price: {$ref: '#/components/schemas/PricingRupiah'}
+    PricingRules:
+      type: object
+      properties:
+        default_base_price: {$ref: '#/components/schemas/PricingRupiah'}
+        slot_prices: {type: array, items: {$ref: '#/components/schemas/SlotPrice'}}
         occupancy_tiers: {type: array, items: {$ref: '#/components/schemas/OccupancyTier'}}
-        floor: {$ref: '#/components/schemas/Rupiah'}
-        cap: {$ref: '#/components/schemas/Rupiah'}
+        floor: {$ref: '#/components/schemas/PricingRupiah'}
+        cap: {$ref: '#/components/schemas/PricingRupiah'}
         category_quotas: {type: array, items: {$ref: '#/components/schemas/CategoryQuota'}}
+    PricingInput:
+      allOf:
+      - {$ref: '#/components/schemas/PricingRules'}
+      - type: object
+        properties:
+          effective_at: {type: string, format: date-time}
+          stand_prices: {type: array, maxItems: 0, items: {$ref: '#/components/schemas/StandPrice'}}
+          block_prices: {type: array, maxItems: 0, items: {$ref: '#/components/schemas/BlockPrice'}}
     PricingVersion:
       type: object
-      required: [event_id, price_version, effective_at]
+      required: [event_id, price_version, effective_at, rules]
       properties:
         event_id: {type: string, format: uuid}
         price_version: {type: string, minLength: 1}
         effective_at: {type: string, format: date-time}
+        rules: {$ref: '#/components/schemas/PricingRules'}
+    PricingSlot:
+      type: object
+      required: [id, code, starts_at, ends_at]
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+    PricingState:
+      type: object
+      required: [slots, active, latest]
+      properties:
+        slots: {type: array, items: {$ref: '#/components/schemas/PricingSlot'}}
+        active:
+          oneOf:
+          - {$ref: '#/components/schemas/PricingVersion'}
+          - {type: 'null'}
+        latest:
+          oneOf:
+          - {$ref: '#/components/schemas/PricingVersion'}
+          - {type: 'null'}
+    PricingPreviewInput:
+      type: object
+      required: [rules, event_slot_id, confirmed_count, capacity]
+      properties:
+        rules: {$ref: '#/components/schemas/PricingInput'}
+        event_slot_id: {type: string, format: uuid}
+        confirmed_count: {type: integer, format: int32, minimum: 0, maximum: 2147483647}
+        capacity: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
+    PricingQuote:
+      type: object
+      required: [base_price, rent, occupancy_bps, multiplier_bps]
+      properties:
+        base_price: {$ref: '#/components/schemas/PricingRupiah'}
+        rent: {$ref: '#/components/schemas/PricingRupiah'}
+        occupancy_bps: {$ref: '#/components/schemas/BasisPoints'}
+        multiplier_bps: {type: integer, format: int32, minimum: 1}
     Application:
       type: object
       required: [id, status, event_id, business_id]
