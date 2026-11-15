@@ -25,6 +25,13 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) == 2 && os.Args[1] == "migrate" {
+		if err := migrate(ctx); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	if err := run(ctx); err != nil {
 		log.Fatal(err)
 	}
