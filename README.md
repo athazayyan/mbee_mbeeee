@@ -40,13 +40,13 @@ Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan sa
 
    Kedua secret harus berbeda dan panjang masing-masing minimal 32 byte. `APP_ORIGIN` harus cocok dengan URL aplikasi FE di browser, yaitu `http://localhost:3001` pada setup bawaan. Tulis origin tanpa path atau garis miring penutup.
 
-4. Setelah PostgreSQL siap, jalankan migration sekali per database baru, kemudian nyalakan API.
+4. Setelah PostgreSQL siap, terapkan migration yang belum tercatat, kemudian nyalakan API.
 
    ```bash
    make migrate && go run .
    ```
 
-   `make migrate` dan `go run .` membaca `.env` dari root repo. Variabel yang sudah ada di environment memiliki prioritas. Setelah migration berhasil, cukup jalankan `go run .` untuk menyalakan API lagi.
+   `make migrate` dan `go run .` membaca `.env` dari root repo. Variabel yang sudah ada di environment memiliki prioritas. Jalankan kembali `make migrate` setelah mengambil migration baru. Runner melewati versi yang sudah tercatat dan mengenali database yang sudah menjalankan migration akun awal.
 
 ## Verifikasi lokal
 
