@@ -12,12 +12,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	apidocs "kitakarsa.com/tenantku/backend/api"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Fatal("could not load .env")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
@@ -32,7 +37,9 @@ func run(ctx context.Context) error {
 	}
 
 	router := gin.Default()
-	apidocs.Routes(router)
+	if os.Getenv("API_DOCS_ENABLED") == "true" {
+		apidocs.Routes(router)
+	}
 	if err := router.SetTrustedProxies(nil); err != nil {
 		return err
 	}
