@@ -644,9 +644,9 @@ paths:
     patch:
       tags: [Acara dan katalog]
       operationId: updateEvent
-      summary: '[Rencana] Ubah acara'
-      description: Pemilik acara. Perubahan material setelah booking memerlukan alur revisi.
-      x-implementation-status: planned
+      summary: Ubah draft acara
+      description: Pemilik organisasi dapat mengubah draft. Perubahan jadwal memperbarui slot seluruh acara.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -697,12 +697,39 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
   /organizations/{id}/events:
+    get:
+      tags: [Acara dan katalog]
+      operationId: listManagedEvents
+      summary: Daftar acara organisasi
+      description: Khusus anggota organisasi. Cursor mengikuti urutan waktu mulai terbaru dan ID acara.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Daftar acara privat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ManagedEvent'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     post:
       tags: [Acara dan katalog]
       operationId: createEvent
-      summary: '[Rencana] Buat draft acara'
-      description: Hanya pengelola organisasi.
-      x-implementation-status: planned
+      summary: Buat draft acara
+      description: Hanya pemilik organisasi. Satu slot dibuat untuk seluruh durasi acara.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -751,6 +778,35 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /organizations/{id}/events/{event_id}:
+    get:
+      tags: [Acara dan katalog]
+      operationId: getManagedEvent
+      summary: Baca acara organisasi
+      description: Khusus anggota organisasi. Rute ini menyediakan detail privat termasuk draft.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      - name: event_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Detail acara privat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ManagedEvent'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /events/{id}/publish:
     post:
@@ -3654,33 +3710,34 @@ components:
         capacity: {type: integer, minimum: 0}
     EventCreate:
       type: object
+      additionalProperties: false
       required: [name, slug, starts_at, ends_at, timezone, city, address]
       properties:
-        name: {type: string, minLength: 1}
-        slug: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
+        name: {type: string, minLength: 1, maxLength: 160}
+        slug: {type: string, maxLength: 120, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
         starts_at: {type: string, format: date-time}
         ends_at: {type: string, format: date-time}
-        timezone: {type: string, minLength: 1}
-        city: {type: string, minLength: 1}
-        address: {type: string, minLength: 1}
-        description: {type: string, minLength: 1}
-        banner_upload_id: {type: string, format: uuid}
-        facilities: {type: array, items: {type: string, minLength: 1}}
-        terms: {type: string, minLength: 1}
+        timezone: {type: string, minLength: 1, maxLength: 64}
+        city: {type: string, minLength: 1, maxLength: 120}
+        address: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, maxLength: 3000}
+        facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
+        terms: {type: string, maxLength: 6000}
     EventUpdate:
       type: object
+      additionalProperties: false
+      minProperties: 1
       properties:
-        name: {type: string, minLength: 1}
-        slug: {type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
+        name: {type: string, minLength: 1, maxLength: 160}
+        slug: {type: string, maxLength: 120, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
         starts_at: {type: string, format: date-time}
         ends_at: {type: string, format: date-time}
-        timezone: {type: string, minLength: 1}
-        city: {type: string, minLength: 1}
-        address: {type: string, minLength: 1}
-        description: {type: string, minLength: 1}
-        banner_upload_id: {type: string, format: uuid}
-        facilities: {type: array, items: {type: string, minLength: 1}}
-        terms: {type: string, minLength: 1}
+        timezone: {type: string, minLength: 1, maxLength: 64}
+        city: {type: string, minLength: 1, maxLength: 120}
+        address: {type: string, minLength: 1, maxLength: 300}
+        description: {type: string, maxLength: 3000}
+        facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
+        terms: {type: string, maxLength: 6000}
     StandLayout:
       type: object
       required: [stand_id, code, x, y, width, height, rotation]
