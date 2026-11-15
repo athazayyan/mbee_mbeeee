@@ -1236,6 +1236,911 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/payments:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: createBookingPayment
+      summary: '[Rencana] Buat payment attempt booking'
+      description: Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PaymentInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentAttempt'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Fitur atau dependensi belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /webhooks/payments/{provider}:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: acceptPaymentWebhook
+      summary: '[Rencana] Terima webhook pembayaran'
+      description: Validasi signature atas payload asli. Dedupe event provider dan akui setelah penyimpanan durable. Format final
+        mengikuti provider.
+      x-implementation-status: planned
+      security:
+      - ProviderSignature: []
+      parameters:
+      - name: provider
+        in: path
+        required: true
+        schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '204':
+          description: Berhasil tanpa isi respons
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Fitur atau dependensi belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/check-in:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: checkInBooking
+      summary: '[Rencana] Check-in booking'
+      description: Petugas acara. Validasi kode, periode acara, dan booking yang eligible. Pengulangan mengembalikan hasil yang
+        sama.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CheckInInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/CheckIn'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/refund-requests:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: requestBookingRefund
+      summary: '[Rencana] Ajukan refund booking'
+      description: Pemesan. Backend menghitung nominal yang memenuhi kebijakan. Hasil awal adalah permintaan.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CaseInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Refund'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/disputes:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: openBookingDispute
+      summary: '[Rencana] Buka sengketa booking'
+      description: Pihak booking. Sengketa aktif dapat membekukan release.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CaseInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Dispute'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/refunds/{id}/approve:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: approveRefund
+      summary: '[Rencana] Setujui instruksi refund'
+      description: Admin berizin. Audit alasan, cek batas kumulatif, dan antrekan instruksi provider.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReasonInput'}
+      responses:
+        '202':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Refund'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Fitur atau dependensi belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/disputes/{id}/resolve:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: resolveDispute
+      summary: '[Rencana] Selesaikan sengketa'
+      description: Admin berizin. Catat keputusan dan alasan audit.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DisputeResolution'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Dispute'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/products:
+    get:
+      tags: [Produk dan kasir]
+      operationId: listProducts
+      summary: '[Rencana] Daftar produk usaha'
+      description: Tenant berhak atas usaha.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, minLength: 1}
+      - name: include_archived
+        in: query
+        required: false
+        schema: {type: boolean}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Product'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Produk dan kasir]
+      operationId: createProduct
+      summary: '[Rencana] Tambah produk'
+      description: Pemilik atau anggota berizin.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductCreate'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Product'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /products/{id}:
+    patch:
+      tags: [Produk dan kasir]
+      operationId: updateProduct
+      summary: '[Rencana] Ubah atau arsipkan produk'
+      description: Riwayat transaksi memakai snapshot yang tetap.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductUpdate'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Product'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/pos-sessions:
+    post:
+      tags: [Produk dan kasir]
+      operationId: openPosSession
+      summary: '[Rencana] Buka sesi kasir'
+      description: Tenant atau kasir berizin. Perangkat dan sesi harus tercatat sebelum sync.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PosSessionInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PosSession'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /sync/sales:
+    post:
+      tags: [Produk dan kasir]
+      operationId: syncSales
+      summary: '[Rencana] Sinkronkan transaksi offline'
+      description: Dedupe per usaha dan sale_id. ID sama dengan payload berbeda menghasilkan SYNC_PAYLOAD_CONFLICT. HTTP 200 membawa
+        hasil per item.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SalesBatch'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/SyncResult'}
+                  meta: {$ref: '#/components/schemas/SyncMeta'}
+              example:
+                data:
+                  results:
+                  - sale_id: 10101010-1010-4010-8010-000000000010
+                    status: accepted
+                    server_id: 10101010-1010-4010-8010-000000000020
+                  - sale_id: 10101010-1010-4010-8010-000000000011
+                    status: duplicate
+                    server_id: 10101010-1010-4010-8010-000000000021
+                  - sale_id: 10101010-1010-4010-8010-000000000012
+                    status: rejected
+                    code: INVALID_TOTAL
+                meta:
+                  server_time: '2026-12-01T04:00:00Z'
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413':
+          description: Ukuran request melebihi batas
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /sales/{id}/adjustments:
+    post:
+      tags: [Produk dan kasir]
+      operationId: createSaleAdjustment
+      summary: '[Rencana] Catat void atau retur'
+      description: Pemilik atau kasir berizin. Koreksi append-only dan jumlah tidak melebihi item pada transaksi asal.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SaleAdjustmentInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ResourceStatus'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/sales:
+    get:
+      tags: [Produk dan kasir]
+      operationId: listSales
+      summary: '[Rencana] Daftar penjualan usaha'
+      description: Tenant berhak atas usaha.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: from
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - name: to
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+      - name: event_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Sale'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/expenses:
+    post:
+      tags: [Produk dan kasir]
+      operationId: createExpense
+      summary: '[Rencana] Catat pengeluaran usaha'
+      description: Hanya anggota usaha berizin.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExpenseInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ResourceStatus'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400':
+          description: Request atau header tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     AccessCookie:
@@ -1246,6 +2151,11 @@ components:
       type: apiKey
       in: cookie
       name: tenantku_refresh
+    ProviderSignature:
+      type: apiKey
+      in: header
+      name: X-Provider-Signature
+      description: Nama header ini placeholder. Format signature, nama header dan payload final mengikuti provider terpilih.
   requestBodies:
     Credentials:
       required: true
@@ -1629,6 +2539,214 @@ components:
         stand_id: {type: string, format: uuid}
         event_slot_id: {type: string, format: uuid}
         accepted_policy_version: {type: string, minLength: 1}
+    PaymentInput:
+      type: object
+      required: [method]
+      properties:
+        method: {type: string, minLength: 1}
+        description: {type: string, maxLength: 200}
+    PaymentAttempt:
+      type: object
+      required: [id, status, amount, currency, provider]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [created, pending, paid, failed, expired]}
+        amount: {$ref: '#/components/schemas/Rupiah'}
+        currency: {type: string, enum: [IDR]}
+        provider: {type: string, minLength: 1}
+        checkout_url: {type: string, format: uri}
+        expires_at: {type: string, format: date-time}
+        funds_status: {type: string, enum: [held, release_pending, released, frozen]}
+    CheckInInput:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string, minLength: 1}
+    CheckIn:
+      type: object
+      required: [booking_id, status, checked_at]
+      properties:
+        booking_id: {type: string, format: uuid}
+        status: {type: string, enum: [checked_in]}
+        checked_at: {type: string, format: date-time}
+    CaseInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1}
+        evidence_upload_ids: {type: array, items: {type: string, format: uuid}}
+    Refund:
+      type: object
+      required: [id, status]
+      properties:
+        id: {type: string, format: uuid}
+        booking_id: {type: string, format: uuid}
+        amount: {$ref: '#/components/schemas/Rupiah'}
+        status: {type: string, enum: [requested, approved, processing, succeeded, failed, rejected]}
+    Dispute:
+      type: object
+      required: [id, status]
+      properties:
+        id: {type: string, format: uuid}
+        booking_id: {type: string, format: uuid}
+        status: {type: string, enum: [open, investigating, resolved, closed]}
+        resolution: {type: string, minLength: 1}
+    DisputeResolution:
+      type: object
+      required: [resolution, reason]
+      properties:
+        resolution: {type: string, minLength: 1}
+        reason: {type: string, minLength: 1}
+    Product:
+      type: object
+      required: [id, business_id, name, price, stock]
+      properties:
+        id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1}
+        sku: {type: string, minLength: 1}
+        price: {$ref: '#/components/schemas/Rupiah'}
+        cost: {$ref: '#/components/schemas/Rupiah'}
+        category_id: {type: string, format: uuid}
+        photo_upload_id: {type: string, format: uuid}
+        stock: {type: integer}
+        archived_at: {type: string, format: date-time}
+    ProductCreate:
+      type: object
+      required: [name, price]
+      properties:
+        name: {type: string, minLength: 1}
+        sku: {type: string, minLength: 1}
+        price: {$ref: '#/components/schemas/Rupiah'}
+        cost: {$ref: '#/components/schemas/Rupiah'}
+        category_id: {type: string, format: uuid}
+        photo_upload_id: {type: string, format: uuid}
+        initial_stock: {type: integer, minimum: 0}
+    ProductUpdate:
+      type: object
+      properties:
+        name: {type: string, minLength: 1}
+        sku: {type: string, minLength: 1}
+        price: {$ref: '#/components/schemas/Rupiah'}
+        cost: {$ref: '#/components/schemas/Rupiah'}
+        category_id: {type: string, format: uuid}
+        photo_upload_id: {type: string, format: uuid}
+        archived: {type: boolean}
+    PosSessionInput:
+      type: object
+      required: [device_id]
+      properties:
+        device_id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+    PosSession:
+      type: object
+      required: [id, business_id, device_id, opened_at, status]
+      properties:
+        id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        opened_at: {type: string, format: date-time}
+        status: {type: string, enum: [open, closed]}
+    SaleItem:
+      type: object
+      required: [product_id, product_name, quantity, unit_price, subtotal]
+      properties:
+        product_id: {type: string, format: uuid}
+        product_name: {type: string, minLength: 1}
+        quantity: {type: integer, minimum: 1}
+        unit_price: {$ref: '#/components/schemas/Rupiah'}
+        unit_cost: {$ref: '#/components/schemas/Rupiah'}
+        discount: {$ref: '#/components/schemas/Rupiah'}
+        subtotal: {$ref: '#/components/schemas/Rupiah'}
+    SaleInput:
+      type: object
+      required: [sale_id, device_id, business_id, session_id, client_created_at, schema_version, payload_hash, items, currency,
+        method, total]
+      properties:
+        sale_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        client_created_at: {type: string, format: date-time}
+        schema_version: {type: integer, minimum: 1}
+        payload_hash: {type: string, minLength: 1}
+        items: {type: array, items: {$ref: '#/components/schemas/SaleItem'}, minItems: 1}
+        currency: {type: string, enum: [IDR]}
+        method: {type: string, enum: [cash, external]}
+        discount: {$ref: '#/components/schemas/Rupiah'}
+        total: {$ref: '#/components/schemas/Rupiah'}
+    Sale:
+      type: object
+      required: [id, sale_id, business_id, client_created_at, received_at, items, total, currency, method]
+      properties:
+        id: {type: string, format: uuid}
+        received_at: {type: string, format: date-time}
+        sale_id: {type: string, format: uuid}
+        device_id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        client_created_at: {type: string, format: date-time}
+        schema_version: {type: integer, minimum: 1}
+        payload_hash: {type: string, minLength: 1}
+        items: {type: array, items: {$ref: '#/components/schemas/SaleItem'}, minItems: 1}
+        currency: {type: string, enum: [IDR]}
+        method: {type: string, enum: [cash, external]}
+        discount: {$ref: '#/components/schemas/Rupiah'}
+        total: {$ref: '#/components/schemas/Rupiah'}
+    SyncSucceeded:
+      type: object
+      required: [sale_id, status, server_id]
+      properties:
+        sale_id: {type: string, format: uuid}
+        status: {type: string, enum: [accepted, duplicate]}
+        server_id: {type: string, format: uuid}
+    SyncFailed:
+      type: object
+      required: [sale_id, status, code]
+      properties:
+        sale_id: {type: string, format: uuid}
+        status: {type: string, enum: [rejected, retryable]}
+        code: {type: string, minLength: 1}
+    SyncResult:
+      type: object
+      required: [results]
+      properties:
+        results: {type: array, items: {oneOf: [{$ref: '#/components/schemas/SyncSucceeded'}, {$ref: '#/components/schemas/SyncFailed'}]}}
+    SyncMeta:
+      type: object
+      required: [server_time]
+      properties:
+        server_time: {type: string, format: date-time}
+    SalesBatch:
+      type: object
+      required: [sales]
+      properties:
+        sales: {type: array, items: {$ref: '#/components/schemas/SaleInput'}, minItems: 1, maxItems: 100}
+    AdjustmentItem:
+      type: object
+      required: [sale_item_id, quantity]
+      properties:
+        sale_item_id: {type: string, format: uuid}
+        quantity: {type: integer, minimum: 1}
+    SaleAdjustmentInput:
+      type: object
+      required: [type, reason]
+      properties:
+        type: {type: string, enum: [void, return]}
+        reason: {type: string, minLength: 1}
+        items: {type: array, items: {$ref: '#/components/schemas/AdjustmentItem'}}
+    ExpenseInput:
+      type: object
+      required: [amount, category, occurred_at]
+      properties:
+        amount: {$ref: '#/components/schemas/Rupiah'}
+        category: {type: string, minLength: 1}
+        occurred_at: {type: string, format: date-time}
+        note: {type: string, minLength: 1}
+        event_id: {type: string, format: uuid}
   parameters:
     Cursor:
       name: cursor
@@ -1664,3 +2782,7 @@ tags:
   description: Denah terbit dan revisi harga oleh penyelenggara.
 - name: Kurasi dan booking
   description: Pendaftaran, penawaran, inventori stand, dan snapshot booking.
+- name: Pembayaran dan operasional dana
+  description: Pembayaran, webhook, check-in, refund dan sengketa.
+- name: Produk dan kasir
+  description: Katalog, sesi kasir, transaksi dan sinkronisasi offline.
