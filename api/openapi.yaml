@@ -165,7 +165,7 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
       tags: [Akun dan sesi]
       x-implementation-status: implemented
-      description: Mengembalikan id dan email. Membership usaha dan organisasi ditambahkan pada implementasi onboarding.
+      description: Mengembalikan ID, email, serta membership usaha dan organisasi dari akun aktif.
   /healthz:
     get:
       tags: [Operasional]
@@ -273,8 +273,8 @@ paths:
     get:
       tags: [Akun dan sesi]
       operationId: listBusinessCategories
-      summary: '[Rencana] Daftar kategori usaha'
-      x-implementation-status: planned
+      summary: 'Daftar kategori usaha'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       responses:
@@ -295,8 +295,8 @@ paths:
     post:
       tags: [Akun dan sesi]
       operationId: createBusiness
-      summary: '[Rencana] Buat usaha'
-      x-implementation-status: planned
+      summary: 'Buat usaha'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       description: Pemilik pertama diambil dari sesi dan dicatat dalam transaksi yang sama.
@@ -325,8 +325,8 @@ paths:
     post:
       tags: [Akun dan sesi]
       operationId: createOrganization
-      summary: '[Rencana] Buat organisasi'
-      x-implementation-status: planned
+      summary: 'Buat organisasi'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       description: Organisasi baru berstatus unverified dan pembuatnya menjadi pemilik.
@@ -355,8 +355,8 @@ paths:
     get:
       tags: [Akun dan sesi]
       operationId: getOrganization
-      summary: '[Rencana] Lihat organisasi'
-      x-implementation-status: planned
+      summary: 'Lihat organisasi'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -379,8 +379,8 @@ paths:
     patch:
       tags: [Akun dan sesi]
       operationId: updateOrganization
-      summary: '[Rencana] Ubah profil organisasi'
-      x-implementation-status: planned
+      summary: 'Ubah profil organisasi'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       description: Hanya pemilik organisasi.
@@ -412,8 +412,8 @@ paths:
     get:
       tags: [Akun dan sesi]
       operationId: getBusiness
-      summary: '[Rencana] Lihat profil usaha'
-      x-implementation-status: planned
+      summary: 'Lihat profil usaha'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -436,9 +436,9 @@ paths:
     patch:
       tags: [Akun dan sesi]
       operationId: updateBusiness
-      summary: '[Rencana] Ubah profil usaha'
+      summary: 'Ubah profil usaha'
       description: Hanya pemilik usaha.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -487,11 +487,11 @@ paths:
     get:
       tags: [Akun dan sesi]
       operationId: listBusinessConsents
-      summary: '[Rencana] Lihat riwayat persetujuan'
-      x-implementation-status: planned
+      summary: 'Lihat riwayat persetujuan'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
-      description: Hanya pemilik usaha. Urutan dari peristiwa terbaru.
+      description: Hanya pemilik usaha. Maksimal 100 peristiwa, dari yang terbaru.
       parameters:
       - {$ref: '#/components/parameters/IdentityResourceID'}
       responses:
@@ -512,9 +512,9 @@ paths:
     post:
       tags: [Akun dan sesi]
       operationId: recordConsent
-      summary: '[Rencana] Catat persetujuan data'
+      summary: 'Catat persetujuan data'
       description: Pemilik usaha. Grant dan revoke membuat entri audit baru.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -3542,6 +3542,7 @@ components:
       allOf:
       - {$ref: '#/components/schemas/Account'}
       - type: object
+        required: [memberships]
         properties:
           memberships:
             type: array
@@ -3596,11 +3597,12 @@ components:
         category_id: {type: string, format: uuid}
     ConsentInput:
       type: object
+      additionalProperties: false
       required: [purpose, granted, policy_version]
       properties:
         purpose: {type: string, enum: [analytics]}
         granted: {type: boolean}
-        policy_version: {type: string, minLength: 1}
+        policy_version: {type: string, enum: [analytics-v1]}
     ConsentEvent:
       type: object
       required: [id, business_id, purpose, granted, policy_version, created_at]

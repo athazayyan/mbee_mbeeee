@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 	apidocs "kitakarsa.com/tenantku/backend/api"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
@@ -71,15 +73,22 @@ func run(ctx context.Context) error {
 		}
 		defer pool.Close()
 		service, err := auth.New(startup, pool, os.Getenv("JWT_SIGNING_KEY"), os.Getenv("REFRESH_TOKEN_PEPPER"))
-		cancel()
 		if err != nil {
+			cancel()
 			return err
 		}
+		profiles := identity.Store{DB: pool}
+		err = profiles.Ready(startup)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("identity schema unavailable; run make migrate: %w", err)
+		}
 		service.Routes(api, origin)
+		profiles.Routes(api, service, origin)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
-			if service.Ready(probe) != nil {
+			if service.Ready(probe) != nil || profiles.Ready(probe) != nil {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
 				return
 			}
@@ -96,7 +105,7 @@ func run(ctx context.Context) error {
 		api.POST("/auth/login", unavailable)
 		api.POST("/auth/refresh", unavailable)
 		api.POST("/auth/logout", unavailable)
-		api.GET("/me", unavailable)
+		identity.Store{}.Routes(api, nil, "")
 	}
 
 	server := &http.Server{

@@ -23,24 +23,16 @@ const (
 
 type handler struct {
 	service *Service
-	origin  string
 	secure  bool
 }
 
 func (s *Service) Routes(api *gin.RouterGroup, origin string) {
-	h := handler{service: s, origin: origin, secure: strings.HasPrefix(origin, "https://")}
-	group := api.Group("/auth", h.checkOrigin, limitMutations())
+	h := handler{service: s, secure: strings.HasPrefix(origin, "https://")}
+	group := api.Group("/auth", httpapi.RequireOrigin(origin), limitMutations())
 	group.POST("/register", h.register)
 	group.POST("/login", h.login)
 	group.POST("/refresh", h.refresh)
 	group.POST("/logout", h.logout)
-	api.GET("/me", h.me)
-}
-
-func (h handler) checkOrigin(c *gin.Context) {
-	if c.GetHeader("Origin") != h.origin {
-		httpapi.Error(c, http.StatusForbidden, "ORIGIN_REJECTED", "Origin tidak diizinkan.", nil)
-	}
 }
 
 // Separate minute windows and cap the number of peers tracked per process.
@@ -157,18 +149,24 @@ func (h handler) logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h handler) me(c *gin.Context) {
-	access, err := c.Cookie(accessCookie)
-	if err != nil {
-		sendError(c, errSession)
-		return
+func (s *Service) WithAccount(next func(*gin.Context, Account)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil {
+			httpapi.Error(c, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "Layanan akun belum tersedia.", nil)
+			return
+		}
+		access, err := c.Cookie(accessCookie)
+		if err != nil {
+			sendError(c, errSession)
+			return
+		}
+		account, err := s.account(c.Request.Context(), access)
+		if err != nil {
+			sendError(c, err)
+			return
+		}
+		next(c, account)
 	}
-	account, err := h.service.account(c.Request.Context(), access)
-	if err != nil {
-		sendError(c, err)
-		return
-	}
-	httpapi.Success(c, http.StatusOK, account)
 }
 
 func (h handler) writeSession(c *gin.Context, result tokens) {
