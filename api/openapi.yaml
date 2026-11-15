@@ -153,7 +153,7 @@ paths:
       - AccessCookie: []
       responses:
         '200':
-          $ref: '#/components/responses/Account'
+          $ref: '#/components/responses/AccountProfile'
         '401':
           $ref: '#/components/responses/Error'
         default:
@@ -165,7 +165,7 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
       tags: [Akun dan sesi]
       x-implementation-status: implemented
-      description: Saat ini mengembalikan id dan email. Profil tambahan dan daftar membership direncanakan.
+      description: Mengembalikan id dan email. Membership usaha dan organisasi ditambahkan pada implementasi onboarding.
   /healthz:
     get:
       tags: [Operasional]
@@ -269,7 +269,170 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /business-categories:
+    get:
+      tags: [Akun dan sesi]
+      operationId: listBusinessCategories
+      summary: '[Rencana] Daftar kategori usaha'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BusinessCategory'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses:
+    post:
+      tags: [Akun dan sesi]
+      operationId: createBusiness
+      summary: '[Rencana] Buat usaha'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      description: Pemilik pertama diambil dari sesi dan dicatat dalam transaksi yang sama.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/BusinessCreate'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Business'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /organizations:
+    post:
+      tags: [Akun dan sesi]
+      operationId: createOrganization
+      summary: '[Rencana] Buat organisasi'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      description: Organisasi baru berstatus unverified dan pembuatnya menjadi pemilik.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrganizationInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Organization'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /organizations/{id}:
+    get:
+      tags: [Akun dan sesi]
+      operationId: getOrganization
+      summary: '[Rencana] Lihat organisasi'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Organization'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    patch:
+      tags: [Akun dan sesi]
+      operationId: updateOrganization
+      summary: '[Rencana] Ubah profil organisasi'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      description: Hanya pemilik organisasi.
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OrganizationInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Organization'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /businesses/{id}:
+    get:
+      tags: [Akun dan sesi]
+      operationId: getBusiness
+      summary: '[Rencana] Lihat profil usaha'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Business'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     patch:
       tags: [Akun dan sesi]
       operationId: updateBusiness
@@ -321,6 +484,31 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
   /businesses/{id}/consents:
+    get:
+      tags: [Akun dan sesi]
+      operationId: listBusinessConsents
+      summary: '[Rencana] Lihat riwayat persetujuan'
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      description: Hanya pemilik usaha. Urutan dari peristiwa terbaru.
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ConsentEvent'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     post:
       tags: [Akun dan sesi]
       operationId: recordConsent
@@ -3232,6 +3420,11 @@ components:
           schema:
             $ref: '#/components/schemas/Credentials'
   responses:
+    AccountProfile:
+      description: Akun aktif dan keanggotaan yang tersedia
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AccountProfileResponse'}
     Account:
       description: Account details
       content:
@@ -3339,6 +3532,54 @@ components:
       properties:
         token: {type: string, minLength: 1}
         password: {type: string, format: password, minLength: 12}
+    AccountProfileResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/AccountProfile'}
+        meta: {$ref: '#/components/schemas/EmptyMeta'}
+    AccountProfile:
+      allOf:
+      - {$ref: '#/components/schemas/Account'}
+      - type: object
+        properties:
+          memberships:
+            type: array
+            items: {$ref: '#/components/schemas/Membership'}
+    Membership:
+      type: object
+      required: [subject_type, subject_id, name, role]
+      properties:
+        subject_type: {type: string, enum: [business, organization]}
+        subject_id: {type: string, format: uuid}
+        name: {type: string}
+        role: {type: string, enum: [owner, member]}
+    BusinessCategory:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    BusinessCreate:
+      type: object
+      additionalProperties: false
+      required: [name, category_id]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        category_id: {type: string, format: uuid}
+    OrganizationInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+    Organization:
+      type: object
+      required: [id, name, verification_status]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        verification_status: {type: string, enum: [unverified, verified]}
     Business:
       type: object
       required: [id, name, category_id]
@@ -3348,8 +3589,10 @@ components:
         category_id: {type: string, format: uuid}
     BusinessUpdate:
       type: object
+      minProperties: 1
+      additionalProperties: false
       properties:
-        name: {type: string, minLength: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
         category_id: {type: string, format: uuid}
     ConsentInput:
       type: object
@@ -4049,6 +4292,11 @@ components:
         version: {type: integer, minimum: 1}
         effective_at: {type: string, format: date-time}
   parameters:
+    IdentityResourceID:
+      in: path
+      name: id
+      required: true
+      schema: {type: string, format: uuid}
     Cursor:
       name: cursor
       in: query
