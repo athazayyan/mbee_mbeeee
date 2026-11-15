@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
 func main() {
@@ -36,8 +39,52 @@ func run(ctx context.Context) error {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	api := router.Group("/api/v1", httpapi.RequestID, func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+	})
+	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
+		origin, err := appOrigin(os.Getenv("APP_ORIGIN"))
+		if err != nil {
+			return err
+		}
+		startup, cancel := context.WithTimeout(ctx, 10*time.Second)
+		pool, err := pgxpool.New(startup, databaseURL)
+		if err != nil {
+			cancel()
+			return errors.New("invalid PostgreSQL configuration")
+		}
+		defer pool.Close()
+		service, err := auth.New(startup, pool, os.Getenv("JWT_SIGNING_KEY"), os.Getenv("REFRESH_TOKEN_PEPPER"))
+		cancel()
+		if err != nil {
+			return err
+		}
+		service.Routes(api, origin)
+		router.GET("/readyz", func(c *gin.Context) {
+			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+			defer cancel()
+			if service.Ready(probe) != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"status": "ready"})
+		})
+	} else {
+		router.GET("/readyz", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+		})
+		unavailable := func(c *gin.Context) {
+			httpapi.Error(c, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "Layanan akun belum tersedia.", nil)
+		}
+		api.POST("/auth/register", unavailable)
+		api.POST("/auth/login", unavailable)
+		api.POST("/auth/refresh", unavailable)
+		api.POST("/auth/logout", unavailable)
+		api.GET("/me", unavailable)
+	}
+
 	server := &http.Server{
-		Addr:              ":" + port,
+		Addr:              os.Getenv("HOST") + ":" + port,
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
