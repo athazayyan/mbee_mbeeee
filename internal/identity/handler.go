@@ -1,24 +1,22 @@
 package identity
 
 import (
-	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
-const analyticsPolicy = "analytics-v1"
+const (
+	analyticsPolicy = "analytics-v1"
+	maxInputSize    = 4096
+)
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/me", sessions.WithAccount(s.me))
@@ -63,7 +61,7 @@ func validateBusiness(input businessInput, create bool) map[string]string {
 	if (create || input.Name != nil) && !validName(input.Name) {
 		fields["name"] = "Masukkan nama usaha dengan panjang 1–120 karakter."
 	}
-	if (create && input.CategoryID == nil) || (input.CategoryID != nil && !validID(*input.CategoryID)) {
+	if (create && input.CategoryID == nil) || (input.CategoryID != nil && !httpapi.ValidID(*input.CategoryID)) {
 		fields["category_id"] = "Pilih kategori usaha yang valid."
 	}
 	if !create && input.Name == nil && input.CategoryID == nil {
@@ -73,7 +71,7 @@ func validateBusiness(input businessInput, create bool) map[string]string {
 }
 
 func (s Store) addBusiness(c *gin.Context, account auth.Account) {
-	input, ok := readInput[businessInput](c)
+	input, ok := httpapi.ReadJSON[businessInput](c, maxInputSize)
 	if !ok || !validate(c, validateBusiness(input, true)) {
 		return
 	}
@@ -95,7 +93,7 @@ func (s Store) patchBusiness(c *gin.Context, account auth.Account) {
 	if !ok {
 		return
 	}
-	input, ok := readInput[businessInput](c)
+	input, ok := httpapi.ReadJSON[businessInput](c, maxInputSize)
 	if !ok || !validate(c, validateBusiness(input, false)) {
 		return
 	}
@@ -108,7 +106,7 @@ type organizationInput struct {
 }
 
 func readOrganizationName(c *gin.Context) (string, bool) {
-	input, ok := readInput[organizationInput](c)
+	input, ok := httpapi.ReadJSON[organizationInput](c, maxInputSize)
 	if !ok {
 		return "", false
 	}
@@ -170,7 +168,7 @@ func (s Store) addConsent(c *gin.Context, account auth.Account) {
 	if !ok {
 		return
 	}
-	input, ok := readInput[consentInput](c)
+	input, ok := httpapi.ReadJSON[consentInput](c, maxInputSize)
 	if !ok {
 		return
 	}
@@ -191,19 +189,6 @@ func (s Store) addConsent(c *gin.Context, account auth.Account) {
 	writeResult(c, http.StatusCreated, event, err)
 }
 
-func readInput[T any](c *gin.Context) (T, bool) {
-	var input *T
-	body := http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
-	decoder := json.NewDecoder(body)
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || input == nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
-		var zero T
-		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Isi request tidak valid.", nil)
-		return zero, false
-	}
-	return *input, true
-}
-
 func validate(c *gin.Context, fields map[string]string) bool {
 	if len(fields) == 0 {
 		return true
@@ -217,17 +202,12 @@ func validName(name *string) bool {
 		return false
 	}
 	*name = strings.TrimSpace(*name)
-	return *name != "" && utf8.RuneCountInString(*name) <= 120 && strings.IndexFunc(*name, unicode.IsControl) < 0
-}
-
-func validID(id string) bool {
-	var uuid pgtype.UUID
-	return len(id) == 36 && uuid.Scan(id) == nil
+	return httpapi.ValidSingleLine(*name, 120)
 }
 
 func resourceID(c *gin.Context) (string, bool) {
 	id := c.Param("id")
-	if !validID(id) {
+	if !httpapi.ValidID(id) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Profil tidak ditemukan.", nil)
 		return "", false
 	}
