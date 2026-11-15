@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TenantKu API Reference</title>
+  </head>
+  <body>
+    <div id="tenantku-reference"></div>
+    <noscript>Aktifkan JavaScript atau buka <a href="/api/openapi.yaml">kontrak OpenAPI</a>.</noscript>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.78.1"
+      integrity="sha384-HVpqul+lojb2wwVK554SYr5rD2XqgJZqkYKGl4MyZarBSg+rHR9F0x1LVgzgj7JZ"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      Scalar.createApiReference('#tenantku-reference', {
+        sources: [{
+          title: 'TenantKu API',
+          url: '/api/openapi.yaml',
+          agent: { disabled: true },
+        }],
+        withDefaultFonts: false,
+        telemetry: false,
+        showOperationId: true,
+      })
+    </script>
+  </body>
+</html>
