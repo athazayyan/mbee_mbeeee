@@ -70,6 +70,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	}
 	mutations.POST("/organizations/:id/events", sessions.WithAccount(s.createEvent))
 	mutations.PATCH("/events/:id", sessions.WithAccount(s.updateEvent))
+	mutations.POST("/events/:id/duplicate", sessions.WithAccount(s.duplicateEvent))
+	mutations.POST("/events/:id/cancel", sessions.WithAccount(s.cancelEvent))
 }
 
 func (s Store) listEvents(c *gin.Context, account auth.Account) {
@@ -266,7 +268,7 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Acara atau organisasi tidak ditemukan.", nil)
 	case errors.Is(err, errDraftRequired):
-		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_DRAFT", "Acara hanya dapat diedit saat masih berupa draft.", nil)
+		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_DRAFT", "Aksi ini hanya tersedia pada draft acara.", nil)
 	case errors.As(err, &dbError) && dbError.ConstraintName == "events_slug_key":
 		httpapi.Error(c, http.StatusConflict, "SLUG_IN_USE", "Slug sudah digunakan.", map[string]string{"slug": "Gunakan slug lain."})
 	default:

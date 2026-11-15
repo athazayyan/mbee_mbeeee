@@ -859,13 +859,52 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/duplicate:
+    post:
+      tags: [Acara dan katalog]
+      operationId: duplicateEvent
+      summary: Salin acara sebagai draft
+      description: Pemilik organisasi dapat menyalin informasi, jadwal, fasilitas, dan syarat ke draft baru. Slot dibuat ulang. Denah, harga, peserta, booking, dan pembayaran tidak ikut disalin.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, slug]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 160}
+                slug: {type: string, minLength: 1, maxLength: 120, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'}
+      responses:
+        '201':
+          description: Draft salinan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ManagedEvent'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/cancel:
     post:
       tags: [Acara dan katalog]
       operationId: cancelEvent
-      summary: '[Rencana] Batalkan acara'
-      description: Pemilik atau admin berizin. Hentikan hold baru dan jadwalkan refund yang memenuhi kebijakan.
-      x-implementation-status: planned
+      summary: Batalkan draft acara
+      description: Pemilik organisasi dapat membatalkan draft dengan alasan. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat. Pembatalan acara terbit dan refund direncanakan setelah integrasi booking.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -878,7 +917,12 @@ paths:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/ReasonInput'}
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, minLength: 1, maxLength: 2000}
       responses:
         '200':
           description: Berhasil
