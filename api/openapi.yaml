@@ -4143,10 +4143,11 @@ components:
         multiplier_bps: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
     CategoryQuota:
       type: object
+      description: Satu batas per kategori untuk seluruh acara jika block_id kosong, atau untuk satu blok jika diisi. Jika keduanya ada, hold wajib memenuhi kedua batas tersebut.
       required: [category_id, cap]
       properties:
         category_id: {type: string, format: uuid}
-        block_id: {type: string, format: uuid}
+        block_id: {type: string, format: uuid, description: Blok dengan stand aktif dalam denah acara.}
         cap: {type: integer, format: int32, minimum: 0, maximum: 2147483647}
     PricingRupiah:
       type: integer

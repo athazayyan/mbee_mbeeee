@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -232,8 +233,12 @@ func checkPricingCategories(ctx context.Context, tx pgx.Tx, quotas []categoryQuo
 		return nil
 	}
 	categories := make([]string, 0, len(quotas))
+	seen := make(map[string]bool, len(quotas))
 	for _, quota := range quotas {
-		categories = append(categories, quota.CategoryID)
+		if !seen[quota.CategoryID] {
+			categories = append(categories, quota.CategoryID)
+			seen[quota.CategoryID] = true
+		}
 	}
 	var count int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM business_categories
@@ -249,16 +254,20 @@ func checkPricingCategories(ctx context.Context, tx pgx.Tx, quotas []categoryQuo
 
 func (s Store) validatePricingInventory(ctx context.Context, tx pgx.Tx, eventID string, slots []pricedSlot, rules priceRules, previewSlot, standID string) (priceTarget, error) {
 	target := priceTarget{slotID: previewSlot}
-	hasOverrides := len(rules.StandPrices) > 0 || len(rules.BlockPrices) > 0
-	if !hasOverrides && standID == "" {
+	hasBlockQuotas := slices.ContainsFunc(rules.CategoryQuotas, func(quota categoryQuota) bool { return quota.BlockID != "" })
+	hasLayoutRules := len(rules.StandPrices) > 0 || len(rules.BlockPrices) > 0 || hasBlockQuotas
+	if !hasLayoutRules && standID == "" {
 		return target, nil
 	}
 	if s.PricingInventory == nil {
+		if hasBlockQuotas {
+			return target, fieldErrors{"category_quotas": "Kuota blok tersedia setelah denah terhubung."}
+		}
 		return target, fieldErrors{"layout": "Harga stand dan blok tersedia setelah denah terhubung."}
 	}
 	stands, blocks := make(map[string]bool), make(map[string]bool)
 	for _, slot := range slots {
-		if !hasOverrides && slot.ID != previewSlot {
+		if !hasLayoutRules && slot.ID != previewSlot {
 			continue
 		}
 		inventory, err := s.PricingInventory.ActiveStands(ctx, tx, eventID, slot.ID)
@@ -289,6 +298,12 @@ func (s Store) validatePricingInventory(ctx context.Context, tx pgx.Tx, eventID 
 	for _, price := range rules.BlockPrices {
 		if !blocks[price.BlockID] {
 			fields["block_prices"] = "Gunakan blok yang memiliki stand aktif pada acara ini."
+			break
+		}
+	}
+	for _, quota := range rules.CategoryQuotas {
+		if quota.BlockID != "" && !blocks[quota.BlockID] {
+			fields["category_quotas"] = "Gunakan blok yang memiliki stand aktif pada acara ini."
 			break
 		}
 	}

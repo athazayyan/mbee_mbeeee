@@ -109,16 +109,17 @@ func (rules *priceRules) validate() fieldErrors {
 		price.BlockID = strings.ToLower(price.BlockID)
 		validateOverride("block_prices", price.BlockID, price.BasePrice, blocks)
 	}
-	quotas := make(map[string]bool)
+	quotas := make(map[[2]string]bool)
 	for index := range rules.CategoryQuotas {
 		quota := &rules.CategoryQuotas[index]
 		quota.CategoryID = strings.ToLower(quota.CategoryID)
-		if quota.BlockID != "" {
-			fields["category_quotas"] = "Kuota per blok tersedia setelah denah terhubung."
-		} else if !httpapi.ValidID(quota.CategoryID) || quota.Cap == nil || *quota.Cap < 0 || quotas[quota.CategoryID] {
-			fields["category_quotas"] = "Tetapkan satu kuota yang valid per kategori usaha."
+		quota.BlockID = strings.ToLower(quota.BlockID)
+		scope := [2]string{quota.CategoryID, quota.BlockID}
+		if !httpapi.ValidID(quota.CategoryID) || (quota.BlockID != "" && !httpapi.ValidID(quota.BlockID)) ||
+			quota.Cap == nil || *quota.Cap < 0 || quotas[scope] {
+			fields["category_quotas"] = "Tetapkan satu kuota yang valid per kategori pada acara atau blok yang sama."
 		}
-		quotas[quota.CategoryID] = true
+		quotas[scope] = true
 	}
 	thresholds := make(map[int32]bool)
 	highestMultiplier := int32(basisPoints)
