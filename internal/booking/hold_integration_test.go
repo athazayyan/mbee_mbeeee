@@ -51,6 +51,7 @@ func TestHoldTransactions(t *testing.T) {
 			'Asia/Jakarta', 'Banda Aceh', 'Street', 'Original terms') RETURNING id`, org, first)
 	slot := insertID(t, ctx, s, `INSERT INTO event_slots (event_id, code, starts_at, ends_at)
 		SELECT id, 'whole-event', starts_at, ends_at FROM events WHERE id = $1 RETURNING id`, event)
+	createTestStands(t, ctx, s, event, first)
 	execBookingSQL(t, ctx, s, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
 		VALUES ($1, 1, $2, '{"default_base_price":30000}', now())`, event, first)
 
@@ -153,6 +154,15 @@ func TestHoldTransactions(t *testing.T) {
 	a.stand, a.key = testStandTwo, "quota-first"
 	b.stand, b.key = testStandThree, "quota-second"
 	assertOne(raceClaims(a, b, limited), ErrQuotaFull)
+}
+
+func createTestStands(t *testing.T, ctx context.Context, s Store, event, organizer string) {
+	t.Helper()
+	execBookingSQL(t, ctx, s, `INSERT INTO event_layouts (event_id, revision, width, height, cell_meters, updated_by)
+		VALUES ($1, 1, 10, 10, 1, $2)`, event, organizer)
+	execBookingSQL(t, ctx, s, `INSERT INTO stands (id, event_id, code, x, y, width, height)
+		VALUES ($2, $1, 'A1', 1, 1, 1, 1), ($3, $1, 'A2', 2, 1, 1, 1), ($4, $1, 'A3', 3, 1, 1, 1)`,
+		event, testStandOne, testStandTwo, testStandThree)
 }
 
 func createTestBusiness(t *testing.T, ctx context.Context, s Store, category, email string) (string, string) {

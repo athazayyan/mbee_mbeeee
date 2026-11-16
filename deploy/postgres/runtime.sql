@@ -58,6 +58,18 @@ GRANT SELECT (token_hash, session_id, used_at) ON public.session_refresh_tokens 
 GRANT SELECT (id, business_id, event_id, status, expires_at, created_at, refund_policy_version,
     price_revision, rent, platform_fee, provider_fee, total) ON public.bookings TO :"api_role";
 GRANT SELECT (booking_id, stand_id, event_slot_id) ON public.allocations TO :"api_role";
+GRANT SELECT (event_id, status) ON public.allocations TO :"api_role";
+GRANT SELECT ON public.event_layouts, public.layout_blocks, public.layout_areas, public.stands,
+    public.event_layout_revisions TO :"api_role";
+GRANT INSERT (event_id, revision, width, height, cell_meters, updated_by),
+    UPDATE (revision, width, height, cell_meters, updated_by, updated_at) ON public.event_layouts TO :"api_role";
+GRANT INSERT (id, event_id, label, x, y, width, height),
+    UPDATE (label, x, y, width, height), DELETE ON public.layout_blocks TO :"api_role";
+GRANT INSERT (event_id, kind, x, y, width, height), DELETE ON public.layout_areas TO :"api_role";
+GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active),
+    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
+    ON public.stands TO :"api_role";
+GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
 GRANT SELECT (id) ON public.booking_status_history TO :"api_role";
 GRANT INSERT (email, password_hash) ON public.users TO :"api_role";
 GRANT INSERT (user_id, expires_at), UPDATE (revoked_at) ON public.sessions TO :"api_role";

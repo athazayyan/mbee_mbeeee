@@ -90,7 +90,7 @@ func run(ctx context.Context) error {
 			return err
 		}
 		profiles := identity.Store{DB: pool}
-		eventStore := events.Store{DB: pool}
+		eventStore := events.Store{DB: pool, PricingInventory: events.LayoutInventory{}}
 		bookings := booking.Store{DB: pool}
 		checkSchema := func(probe context.Context) error {
 			if err := profiles.Ready(probe); err != nil {

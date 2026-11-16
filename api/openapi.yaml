@@ -1050,6 +1050,51 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /organizations/{id}/events/{event_id}/layout:
+    get:
+      tags: [Denah dan harga]
+      operationId: getManagedLayout
+      summary: Baca denah acara organisasi
+      description: Khusus anggota organisasi, termasuk untuk draft. Bila denah belum ada, mengembalikan grid kosong
+        16 x 12 dengan revision 0 sehingga editor dapat menyimpan revisi pertama.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: event_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/LayoutRevision'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+          headers:
+            ETag:
+              description: ETag revisi denah untuk If-Match.
+              schema: {type: string, minLength: 1}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/duplicate:
     post:
       tags: [Acara dan katalog]
@@ -1214,9 +1259,10 @@ paths:
     get:
       tags: [Denah dan harga]
       operationId: getPublicLayout
-      summary: '[Rencana] Baca denah publik'
-      description: Denah hanya memuat informasi yang boleh dilihat publik.
-      x-implementation-status: planned
+      summary: Baca denah publik
+      description: Hanya untuk acara terbit atau berlangsung. Status stand dihitung dari hold, offer, dan reservasi aktif;
+        base_price dihitung dari versi harga aktif dan dihilangkan bila acara belum punya harga.
+      x-implementation-status: implemented
       security: []
       parameters:
       - name: id
@@ -1232,7 +1278,7 @@ paths:
                 type: object
                 required: [data, meta]
                 properties:
-                  data: {$ref: '#/components/schemas/LayoutRevision'}
+                  data: {$ref: '#/components/schemas/PublicLayout'}
                   meta: {$ref: '#/components/schemas/EmptyMeta'}
           headers:
             ETag:
@@ -1247,9 +1293,12 @@ paths:
     put:
       tags: [Denah dan harga]
       operationId: replaceLayout
-      summary: '[Rencana] Simpan revisi denah penuh'
-      description: Pemilik acara. Validasi batas grid, tumpang tindih dan booking aktif.
-      x-implementation-status: planned
+      summary: Simpan revisi denah penuh
+      description: Pemilik organisasi acara. Menyimpan denah sebagai revisi baru setelah memvalidasi batas grid,
+        tumpang tindih, kode unik, dan kategori. Stand dengan hold, offer, atau reservasi aktif tidak boleh dihapus,
+        dipindah, diubah ukuran, atau dinonaktifkan (STAND_HAS_BOOKING). Acara selesai atau dibatalkan ditolak
+        (EVENT_CLOSED). Harga stand diatur lewat PUT /events/{id}/pricing.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1294,7 +1343,12 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '409':
-          description: LAYOUT_REVISION_CONFLICT atau perubahan material terhadap stand terpesan
+          description: LAYOUT_REVISION_CONFLICT, STAND_HAS_BOOKING, atau EVENT_CLOSED
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '428':
+          description: LAYOUT_REVISION_REQUIRED; denah sudah ada tetapi header If-Match tidak dikirim
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4249,21 +4303,21 @@ components:
       properties:
         stand_id: {type: string, format: uuid}
         block_id: {type: string, format: uuid}
-        code: {type: string, minLength: 1}
+        code: {type: string, minLength: 1, maxLength: 12, description: Unik per acara tanpa membedakan huruf besar kecil.}
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
-        width: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 1, description: Lebar sebelum rotasi; rotasi 90 menukar lebar dan tinggi di grid.}
         height: {type: integer, minimum: 1}
         rotation: {type: integer, enum: [0, 90]}
-        category_ids: {type: array, items: {type: string, format: uuid}}
-        facilities: {type: array, items: {type: string, minLength: 1}}
+        category_ids: {type: array, items: {type: string, format: uuid}, description: Kosong berarti semua kategori boleh.}
+        facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         active: {type: boolean}
     LayoutBlock:
       type: object
       required: [id, label, x, y, width, height]
       properties:
         id: {type: string, format: uuid}
-        label: {type: string, minLength: 1}
+        label: {type: string, minLength: 1, maxLength: 40}
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
         width: {type: integer, minimum: 1}
@@ -4279,23 +4333,48 @@ components:
         height: {type: integer, minimum: 1}
     LayoutRevision:
       type: object
-      required: [event_id, revision, width, height, blocks, stands, areas]
+      required: [event_id, revision, width, height, cell_meters, blocks, stands, areas]
       properties:
         event_id: {type: string, format: uuid}
-        revision: {type: integer, minimum: 1}
-        width: {type: integer, minimum: 1}
-        height: {type: integer, minimum: 1}
+        revision: {type: integer, minimum: 0, description: 0 berarti acara belum punya denah tersimpan.}
+        width: {type: integer, minimum: 4, maximum: 60}
+        height: {type: integer, minimum: 4, maximum: 60}
+        cell_meters: {type: number, minimum: 0.5, maximum: 10, description: Ukuran nyata satu petak dalam meter.}
         blocks: {type: array, items: {$ref: '#/components/schemas/LayoutBlock'}}
         stands: {type: array, items: {$ref: '#/components/schemas/StandLayout'}}
         areas: {type: array, items: {$ref: '#/components/schemas/LayoutArea'}}
     LayoutRevisionInput:
       type: object
-      required: [width, height, blocks, stands, areas]
+      required: [width, height, cell_meters, blocks, stands, areas]
       properties:
-        width: {type: integer, minimum: 1}
-        height: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 4, maximum: 60}
+        height: {type: integer, minimum: 4, maximum: 60}
+        cell_meters: {type: number, minimum: 0.5, maximum: 10}
         blocks: {type: array, items: {$ref: '#/components/schemas/LayoutBlock'}}
         stands: {type: array, items: {$ref: '#/components/schemas/StandLayout'}}
+        areas: {type: array, items: {$ref: '#/components/schemas/LayoutArea'}}
+    PublicStand:
+      allOf:
+      - {$ref: '#/components/schemas/StandLayout'}
+      - type: object
+        required: [status]
+        properties:
+          status:
+            type: string
+            enum: [available, booked, unavailable]
+            description: booked untuk reservasi; unavailable untuk stand nonaktif atau sedang di-hold.
+          base_price: {$ref: '#/components/schemas/Rupiah'}
+    PublicLayout:
+      type: object
+      required: [event_id, revision, width, height, cell_meters, blocks, stands, areas]
+      properties:
+        event_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        width: {type: integer, minimum: 4, maximum: 60}
+        height: {type: integer, minimum: 4, maximum: 60}
+        cell_meters: {type: number, minimum: 0.5, maximum: 10}
+        blocks: {type: array, items: {$ref: '#/components/schemas/LayoutBlock'}}
+        stands: {type: array, items: {$ref: '#/components/schemas/PublicStand'}}
         areas: {type: array, items: {$ref: '#/components/schemas/LayoutArea'}}
     StandPrice:
       type: object
@@ -5010,9 +5089,9 @@ components:
     LayoutRevision:
       name: If-Match
       in: header
-      required: true
+      required: false
       schema: {type: string, minLength: 1}
-      description: ETag revisi layout terkini, misalnya "3".
+      description: ETag revisi denah terkini, misalnya "3". Boleh dikosongkan atau "0" hanya untuk revisi pertama.
 tags:
 - name: Akun dan sesi
   description: Akun, akses, profil usaha, dan persetujuan.
