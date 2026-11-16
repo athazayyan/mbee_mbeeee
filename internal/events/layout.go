@@ -490,8 +490,8 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 			WHERE event_id = $1 ORDER BY (ends_at > $2) DESC, starts_at, id LIMIT 1`, eventID, at).Scan(&slotID, &slotEnds); err != nil {
 			return err
 		}
-		taken := make(map[string]string)
-		rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status FROM allocations a
+		taken := make(map[string]bool)
+		rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status = 'reserved' AND b.status = 'confirmed' FROM allocations a
 			JOIN bookings b ON b.id = a.booking_id
 			WHERE a.event_id = $1 AND a.event_slot_id = $2 AND a.status IN ('hold', 'offer', 'reserved')
 			AND NOT (a.status IN ('hold', 'offer') AND b.status IN ('held', 'payment_pending') AND b.expires_at <= $3)`, eventID, slotID, at)
@@ -499,13 +499,12 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 			return err
 		}
 		for rows.Next() {
-			var stand, allocation string
-			if err := rows.Scan(&stand, &allocation); err != nil {
+			var stand string
+			var confirmed bool
+			if err := rows.Scan(&stand, &confirmed); err != nil {
 				return err
 			}
-			if taken[stand] != "reserved" {
-				taken[stand] = allocation
-			}
+			taken[stand] = confirmed
 		}
 		if err := rows.Err(); err != nil {
 			return err
@@ -524,10 +523,11 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		}
 		for _, stand := range layout.Stands {
 			value := publicStand{layoutStand: stand, Status: "available", BasePrice: prices[stand.ID]}
+			confirmed, allocated := taken[stand.ID]
 			switch {
-			case taken[stand.ID] == "reserved":
+			case confirmed:
 				value.Status = "booked"
-			case result.SlotID == nil || !stand.Active || taken[stand.ID] != "":
+			case result.SlotID == nil || !stand.Active || allocated:
 				value.Status = "unavailable"
 			}
 			result.Stands = append(result.Stands, value)
@@ -538,7 +538,7 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 }
 
 // standPrices quotes each active stand with the active pricing rules for the whole-event slot.
-func standPrices(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time.Time, layout layoutRevision, taken map[string]string) (map[string]*int64, error) {
+func standPrices(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time.Time, layout layoutRevision, confirmedByStand map[string]bool) (map[string]*int64, error) {
 	prices := make(map[string]*int64, len(layout.Stands))
 	active, err := loadPriceVersion(ctx, tx, activePricingQuery, eventID, at)
 	if err != nil || active == nil {
@@ -548,7 +548,7 @@ func standPrices(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time
 	for _, stand := range layout.Stands {
 		if stand.Active {
 			capacity++
-			if taken[stand.ID] == "reserved" {
+			if confirmedByStand[stand.ID] {
 				confirmed++
 			}
 		}
