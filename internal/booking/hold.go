@@ -101,10 +101,12 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		// Serialize hold limits and idempotency by actor, followed by all changes
 		// to allocations and category quotas for this event.
-		var lockedActor, category string
-		if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE`, actor).Scan(&lockedActor); err != nil {
+		// Use a transaction lock so the booking role needs no UPDATE grant on users.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(
+			hashtextextended('tenantku.booking.hold:' || $1::uuid::text, 0))`, actor); err != nil {
 			return err
 		}
+		var category string
 		if err := tx.QueryRow(ctx, `SELECT b.category_id FROM businesses b JOIN memberships m ON m.business_id = b.id
 			WHERE b.id = $1 AND m.user_id = $2 AND m.role = 'owner' FOR SHARE OF b, m`,
 			input.BusinessID, actor).Scan(&category); err != nil {

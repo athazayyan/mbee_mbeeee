@@ -1,6 +1,11 @@
 \set ON_ERROR_STOP on
 -- Apply as the database and table owner after migrations in a dedicated TenantKu database.
 -- Supply two dedicated PostgreSQL login roles through -v api_role=... -v worker_role=....
+-- Set -v booking_hold=true when the API is configured with a hold offer source.
+\if :{?booking_hold}
+\else
+\set booking_hold false
+\endif
 BEGIN;
 
 SELECT current_database() AS database_name,
@@ -11,7 +16,8 @@ SELECT current_database() AS database_name,
            AND NOT (r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls)
            AND r.rolname <> current_user
            AND NOT pg_has_role(r.oid, (SELECT datdba FROM pg_database WHERE datname = current_database()), 'MEMBER'))
-       ) AS valid_runtime_roles
+       ) AS valid_runtime_roles,
+       :'booking_hold'::boolean AS runtime_booking_hold
 \gset
 \if :valid_runtime_roles
 \else
@@ -26,6 +32,17 @@ REVOKE ALL ON SCHEMA public FROM :"api_role", :"worker_role";
 GRANT USAGE ON SCHEMA public TO :"api_role", :"worker_role";
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"api_role", :"worker_role";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
+-- Table-level revokes do not remove column grants from a previous deployment.
+REVOKE SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
+    INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
+        rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
+        refund_policy_snapshot, idempotency_key, request_digest)
+    ON public.bookings FROM :"api_role";
+REVOKE SELECT (block_id, status), UPDATE (status),
+    INSERT (booking_id, event_id, event_slot_id, stand_id, block_id, status)
+    ON public.allocations FROM :"api_role";
+REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
+    ON public.booking_status_history FROM :"api_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
@@ -59,6 +76,19 @@ GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapsho
 GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
+
+\if :runtime_booking_hold
+GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
+    INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
+        rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
+        refund_policy_snapshot, idempotency_key, request_digest)
+    ON public.bookings TO :"api_role";
+GRANT SELECT (block_id, status), UPDATE (status),
+    INSERT (booking_id, event_id, event_slot_id, stand_id, block_id, status)
+    ON public.allocations TO :"api_role";
+GRANT INSERT (booking_id, actor_id, from_status, to_status, reason)
+    ON public.booking_status_history TO :"api_role";
+\endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";
 GRANT SELECT (booking_id, status), UPDATE (status) ON public.allocations TO :"worker_role";
