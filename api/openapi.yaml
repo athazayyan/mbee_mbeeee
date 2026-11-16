@@ -2398,9 +2398,11 @@ paths:
     get:
       tags: [Produk dan kasir]
       operationId: listProducts
-      summary: '[Rencana] Daftar produk usaha'
-      description: Tenant berhak atas usaha.
-      x-implementation-status: planned
+      summary: Daftar produk usaha
+      description: Semua anggota usaha boleh membaca. Urut dari produk terlama; q mencari nama atau SKU tanpa
+        membedakan huruf besar. Produk arsip hanya ikut bila include_archived=true. Usaha yang tidak bisa diakses
+        menjawab 404.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -2453,9 +2455,11 @@ paths:
     post:
       tags: [Produk dan kasir]
       operationId: createProduct
-      summary: '[Rencana] Tambah produk'
-      description: Pemilik atau anggota berizin.
-      x-implementation-status: planned
+      summary: Tambah produk
+      description: Hanya pemilik usaha. initial_stock lebih dari 0 dicatat sebagai mutasi stok 'initial'. SKU unik
+        per usaha tanpa membedakan huruf besar (409 SKU_IN_USE). Foto produk belum didukung; photo_upload_id
+        ditolak dengan 422.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -2509,9 +2513,11 @@ paths:
     patch:
       tags: [Produk dan kasir]
       operationId: updateProduct
-      summary: '[Rencana] Ubah atau arsipkan produk'
-      description: Riwayat transaksi memakai snapshot yang tetap.
-      x-implementation-status: planned
+      summary: Ubah atau arsipkan produk
+      description: Hanya pemilik usaha. Field yang tidak dikirim tidak berubah; sku, cost, dan category_id boleh
+        null untuk dikosongkan. archived=true mengarsipkan, archived=false memulihkan. Stok diubah lewat mutasi stok.
+        Riwayat transaksi memakai snapshot yang tetap.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -2552,6 +2558,54 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '409':
           description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /products/{id}/stock-movements:
+    post:
+      tags: [Produk dan kasir]
+      operationId: createStockMovement
+      summary: Catat mutasi stok manual
+      description: Hanya pemilik usaha. restock menambah stok (delta 1 sampai 100.000); correction menyesuaikan stok
+        hasil hitung ulang (delta selain nol, paling banyak 100.000 ke dua arah). Stok produk dan baris mutasi
+        berubah dalam satu transaksi. Penjualan, retur, dan void kasir mencatat mutasinya sendiri.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StockMovementInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Product'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4711,35 +4765,49 @@ components:
       properties:
         id: {type: string, format: uuid}
         business_id: {type: string, format: uuid}
-        name: {type: string, minLength: 1}
-        sku: {type: string, minLength: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        sku: {type: string, minLength: 1, maxLength: 40}
         price: {$ref: '#/components/schemas/Rupiah'}
         cost: {$ref: '#/components/schemas/Rupiah'}
         category_id: {type: string, format: uuid}
-        photo_upload_id: {type: string, format: uuid}
-        stock: {type: integer}
+        stock:
+          type: integer
+          description: Boleh negatif bila penjualan kasir offline melebihi stok tercatat.
         archived_at: {type: string, format: date-time}
     ProductCreate:
       type: object
+      additionalProperties: false
       required: [name, price]
       properties:
-        name: {type: string, minLength: 1}
-        sku: {type: string, minLength: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        sku: {type: string, maxLength: 40, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$'}
         price: {$ref: '#/components/schemas/Rupiah'}
         cost: {$ref: '#/components/schemas/Rupiah'}
         category_id: {type: string, format: uuid}
-        photo_upload_id: {type: string, format: uuid}
-        initial_stock: {type: integer, minimum: 0}
+        photo_upload_id: {type: string, format: uuid, description: Belum didukung; selalu ditolak.}
+        initial_stock: {type: integer, minimum: 0, maximum: 1000000}
     ProductUpdate:
       type: object
+      additionalProperties: false
+      minProperties: 1
       properties:
-        name: {type: string, minLength: 1}
-        sku: {type: string, minLength: 1}
+        name: {type: string, minLength: 1, maxLength: 120}
+        sku: {type: [string, 'null'], maxLength: 40, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$'}
         price: {$ref: '#/components/schemas/Rupiah'}
-        cost: {$ref: '#/components/schemas/Rupiah'}
-        category_id: {type: string, format: uuid}
-        photo_upload_id: {type: string, format: uuid}
+        cost:
+          oneOf:
+          - {$ref: '#/components/schemas/Rupiah'}
+          - {type: 'null'}
+        category_id: {type: [string, 'null'], format: uuid}
         archived: {type: boolean}
+    StockMovementInput:
+      type: object
+      additionalProperties: false
+      required: [delta, reason]
+      properties:
+        delta: {type: integer, minimum: -100000, maximum: 100000, not: {const: 0}}
+        reason: {type: string, enum: [restock, correction]}
+        note: {type: string, maxLength: 200}
     PosSessionInput:
       type: object
       required: [device_id]

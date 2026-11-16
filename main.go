@@ -21,6 +21,7 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/booking"
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/identity"
+	"kitakarsa.com/tenantku/backend/internal/inventory"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
@@ -92,6 +93,7 @@ func run(ctx context.Context) error {
 		profiles := identity.Store{DB: pool}
 		eventStore := events.Store{DB: pool, PricingInventory: events.LayoutInventory{}}
 		bookings := booking.Store{DB: pool}
+		products := inventory.Store{DB: pool}
 		checkSchema := func(probe context.Context) error {
 			if err := profiles.Ready(probe); err != nil {
 				return fmt.Errorf("identity schema unavailable; run make migrate: %w", err)
@@ -101,6 +103,9 @@ func run(ctx context.Context) error {
 			}
 			if err := bookings.Ready(probe); err != nil {
 				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
+			}
+			if err := products.Ready(probe); err != nil {
+				return fmt.Errorf("inventory schema unavailable; run make migrate: %w", err)
 			}
 			return nil
 		}
@@ -123,6 +128,7 @@ func run(ctx context.Context) error {
 		profiles.Routes(api, service, origin)
 		eventStore.Routes(api, service, origin)
 		bookings.Routes(api, service)
+		products.Routes(api, service, origin)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
@@ -150,6 +156,7 @@ func run(ctx context.Context) error {
 		identity.Store{}.Routes(api, nil, "")
 		events.Store{}.Routes(api, nil, "")
 		booking.Store{}.Routes(api, nil)
+		inventory.Store{}.Routes(api, nil, "")
 	}
 
 	server := &http.Server{
