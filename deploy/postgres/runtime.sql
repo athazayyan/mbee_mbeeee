@@ -125,6 +125,12 @@ GRANT INSERT (business_id, event_id, category, amount, occurred_at, note, create
 GRANT SELECT ON public.pos_devices TO :"api_role";
 GRANT INSERT (business_id, id, label, registered_by),
     UPDATE (label, last_seen_at, last_synced_at, revoked_at, revoked_by, revoke_reason) ON public.pos_devices TO :"api_role";
+-- Rapor usaha (E14): snapshot tidak pernah diubah; tautan berbagi hanya bisa dicabut dan dicatat dilihat.
+GRANT SELECT ON public.business_reports, public.report_shares TO :"api_role";
+GRANT INSERT (business_id, event_id, period_start, period_end, timezone, status, snapshot, verification_code,
+    cutoff_at, requested_by, completed_at) ON public.business_reports TO :"api_role";
+GRANT INSERT (business_id, report_id, token_hash, expires_at, created_by),
+    UPDATE (revoked_at, last_viewed_at, view_count) ON public.report_shares TO :"api_role";
 -- Kasir (E10): sesi per perangkat dan penjualan hasil sync; riwayat penjualan tidak pernah diubah langsung.
 GRANT SELECT ON public.pos_sessions, public.sales, public.sale_items TO :"api_role";
 GRANT INSERT (business_id, device_id, event_id, opened_by), UPDATE (closed_at) ON public.pos_sessions TO :"api_role";
