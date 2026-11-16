@@ -88,11 +88,15 @@ func (s Store) Ready(ctx context.Context) error {
 	return err
 }
 
+// requireMember memeriksa keanggotaan. Pemeriksaan pemilik mengunci baris keanggotaan selama penulisan;
+// pembacaan berjalan di transaksi read-only sehingga tidak boleh memakai FOR SHARE.
 func requireMember(ctx context.Context, tx pgx.Tx, actor, business string, ownerOnly bool) error {
+	query := `SELECT business_id::text FROM memberships WHERE user_id = $1 AND business_id = $2`
+	if ownerOnly {
+		query += ` AND role = 'owner' FOR SHARE`
+	}
 	var found string
-	return tx.QueryRow(ctx, `SELECT business_id::text FROM memberships
-		WHERE user_id = $1 AND business_id = $2 AND ($3 = false OR role = 'owner') FOR SHARE`,
-		actor, business, ownerOnly).Scan(&found)
+	return tx.QueryRow(ctx, query, actor, business).Scan(&found)
 }
 
 func (s Store) list(ctx context.Context, actor, business string, filter listFilter) ([]Product, error) {
