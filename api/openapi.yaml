@@ -1542,7 +1542,7 @@ paths:
       tags: [Kurasi dan booking]
       operationId: createHold
       summary: '[Rencana] Buat hold stand'
-      description: Tenant berhak atas usaha. Inventori dan kuota dikunci. Harga dihitung server.
+      description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
       x-implementation-status: planned
       security:
       - AccessCookie: []
@@ -1560,20 +1560,27 @@ paths:
               event_slot_id: 10101010-1010-4010-8010-000000000004
               accepted_policy_version: refund-v1
       responses:
-        '201':
-          description: Berhasil
+        '200':
+          description: Hasil booking terkini untuk pengulangan idempoten
           content:
             application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data: {$ref: '#/components/schemas/Booking'}
-                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+              schema: {$ref: '#/components/schemas/BookingWithServerTime'}
+        '201':
+          description: Hold baru dibuat
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingWithServerTime'}
               example:
                 data:
                   booking_id: 10101010-1010-4010-8010-000000000005
+                  business_id: 10101010-1010-4010-8010-000000000001
+                  event_id: 10101010-1010-4010-8010-000000000002
+                  event_name: Pasar TenantKu
+                  stand_id: 10101010-1010-4010-8010-000000000003
+                  event_slot_id: 10101010-1010-4010-8010-000000000004
                   status: held
+                  accepted_policy_version: refund-v1
+                  created_at: '2026-12-01T03:00:00Z'
                   expires_at: '2026-12-01T03:15:00Z'
                   price:
                     currency: IDR
@@ -1581,15 +1588,16 @@ paths:
                     platform_fee: 0
                     provider_fee: 0
                     total: 500000
-                    price_version: v1
-                meta: {}
+                    price_version: '1'
+                meta:
+                  server_now: '2026-12-01T03:00:00Z'
         '400':
           description: Request atau header tidak valid
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '401':
-          description: Sesi pengguna atau tanda tangan provider tidak valid
+          description: Sesi pengguna tidak valid
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -1604,7 +1612,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '409':
-          description: Stand telah dialokasikan, kuota penuh, atau IDEMPOTENCY_PAYLOAD_MISMATCH
+          description: EVENT_NOT_BOOKABLE, STAND_UNAVAILABLE, CATEGORY_QUOTA_FULL, REFUND_POLICY_CHANGED, atau IDEMPOTENCY_PAYLOAD_MISMATCH
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -1614,10 +1622,11 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '429':
-          description: Batas percobaan terlampaui
+          description: Batas hold aktif tercapai (HOLD_LIMIT_REACHED)
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /bookings/{id}:
     get:
@@ -1638,12 +1647,7 @@ paths:
           description: Berhasil
           content:
             application/json:
-              schema:
-                type: object
-                required: [data, meta]
-                properties:
-                  data: {$ref: '#/components/schemas/BookingDetail'}
-                  meta: {$ref: '#/components/schemas/ServerTime'}
+              schema: {$ref: '#/components/schemas/BookingWithServerTime'}
         '401':
           description: Sesi pengguna atau tanda tangan provider tidak valid
           content:
@@ -4301,6 +4305,12 @@ components:
       required: [server_now]
       properties:
         server_now: {type: string, format: date-time}
+    BookingWithServerTime:
+      type: object
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/BookingDetail'}
+        meta: {$ref: '#/components/schemas/ServerTime'}
     HoldInput:
       type: object
       required: [business_id, event_id, stand_id, event_slot_id, accepted_policy_version]

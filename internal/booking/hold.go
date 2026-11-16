@@ -65,26 +65,39 @@ type OfferSource interface {
 }
 
 func (s Store) CreateHold(ctx context.Context, actor, key string, input HoldInput, settings HoldSettings, source OfferSource) (Booking, error) {
-	if source == nil || settings.Lifetime < time.Second || settings.MaxActive < 1 {
-		return Booking{}, ErrHoldUnavailable
+	result, _, err := s.createHold(ctx, actor, key, input, settings, source)
+	return result, err
+}
+
+func (settings HoldSettings) valid(source OfferSource) bool {
+	return source != nil && settings.Lifetime >= time.Second && settings.MaxActive > 0
+}
+
+func validHoldKey(key string) bool {
+	return len(key) <= 128 && strings.TrimSpace(key) == key && httpapi.ValidSingleLine(key, 128)
+}
+
+func (s Store) createHold(ctx context.Context, actor, key string, input HoldInput, settings HoldSettings, source OfferSource) (Booking, bool, error) {
+	if !settings.valid(source) {
+		return Booking{}, false, ErrHoldUnavailable
 	}
 	for _, id := range []*string{&input.BusinessID, &input.EventID, &input.StandID, &input.EventSlotID} {
 		*id = strings.ToLower(*id)
 		if !httpapi.ValidID(*id) {
-			return Booking{}, ErrHoldInput
+			return Booking{}, false, ErrHoldInput
 		}
 	}
-	if !httpapi.ValidID(actor) || !httpapi.ValidSingleLine(key, 128) || len(key) > 128 ||
-		strings.TrimSpace(key) != key || !httpapi.ValidSingleLine(input.AcceptedPolicyVersion, 80) {
-		return Booking{}, ErrHoldInput
+	if !httpapi.ValidID(actor) || !validHoldKey(key) || !httpapi.ValidSingleLine(input.AcceptedPolicyVersion, 80) {
+		return Booking{}, false, ErrHoldInput
 	}
 	payload, err := json.Marshal(input)
 	if err != nil {
-		return Booking{}, err
+		return Booking{}, false, err
 	}
 	digest := sha256.Sum256(payload)
 
 	var result Booking
+	var created bool
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		// Serialize hold limits and idempotency by actor, followed by all changes
 		// to allocations and category quotas for this event.
@@ -114,13 +127,12 @@ func (s Store) CreateHold(ctx context.Context, actor, key string, input HoldInpu
 			return err
 		}
 
-		var eventStatus string
 		var terms *string
-		if err := tx.QueryRow(ctx, `SELECT status, terms FROM events WHERE id = $1 FOR NO KEY UPDATE`, input.EventID).
-			Scan(&eventStatus, &terms); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT terms FROM events WHERE id = $1
+			AND status IN ('published', 'live') FOR NO KEY UPDATE`, input.EventID).Scan(&terms); err != nil {
 			return err
 		}
-		if (eventStatus != "published" && eventStatus != "live") || terms == nil || strings.TrimSpace(*terms) == "" {
+		if terms == nil || strings.TrimSpace(*terms) == "" {
 			return ErrNotBookable
 		}
 		var now, ends time.Time
@@ -161,9 +173,10 @@ func (s Store) CreateHold(ctx context.Context, actor, key string, input HoldInpu
 			expires = ends
 		}
 		result, err = insertHold(ctx, tx, actor, key, digest[:], input, category, *terms, expires, offer)
+		created = err == nil
 		return err
 	})
-	return result, err
+	return result, created && err == nil, err
 }
 
 func checkQuota(ctx context.Context, tx pgx.Tx, input HoldInput, category string, now time.Time, offer Offer) error {

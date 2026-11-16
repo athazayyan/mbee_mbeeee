@@ -39,10 +39,10 @@ type Booking struct {
 }
 
 const bookingColumns = `b.id, b.business_id, b.event_id, e.name, a.stand_id, a.event_slot_id,
-	CASE WHEN b.status IN ('held', 'payment_pending') AND b.expires_at <= transaction_timestamp()
+	CASE WHEN b.status IN ('held', 'payment_pending') AND b.expires_at <= statement_timestamp()
 		THEN 'expired' ELSE b.status END,
 	b.expires_at, b.created_at, b.refund_policy_version, b.rent, b.platform_fee, b.provider_fee,
-	b.total, b.price_revision::text, transaction_timestamp()`
+	b.total, b.price_revision::text, statement_timestamp()`
 
 func (s Store) Ready(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `SELECT 1 FROM bookings, allocations, booking_status_history LIMIT 0`)
@@ -81,6 +81,9 @@ func (s Store) list(ctx context.Context, actor, businessID string, before time.T
 		bookings, err = pgx.AppendRows(bookings, rows, func(row pgx.CollectableRow) (Booking, error) {
 			return scanBooking(row)
 		})
+		if len(bookings) > 0 {
+			serverNow = bookings[0].ServerNow
+		}
 		return err
 	})
 	return bookings, serverNow, err

@@ -16,6 +16,61 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service) {
 	api.GET("/bookings/:id", sessions.WithAccount(s.getBooking))
 }
 
+// HoldRoutes is registered when the runtime has a stand, price, and policy source.
+func (s Store) HoldRoutes(api *gin.RouterGroup, sessions *auth.Service, origin string, settings HoldSettings, source OfferSource) error {
+	if s.DB == nil || sessions == nil || origin == "" || !settings.valid(source) {
+		return ErrHoldUnavailable
+	}
+	api.POST("/bookings/holds", httpapi.RequireOrigin(origin), sessions.WithAccount(func(c *gin.Context, account auth.Account) {
+		key := c.GetHeader("Idempotency-Key")
+		if !validHoldKey(key) {
+			httpapi.Error(c, http.StatusBadRequest, "INVALID_IDEMPOTENCY_KEY", "Sertakan Idempotency-Key dengan panjang 1–128 byte.", nil)
+			return
+		}
+		input, ok := httpapi.ReadJSON[HoldInput](c, 4096)
+		if !ok {
+			return
+		}
+		reply, created, err := s.createHold(c.Request.Context(), account.ID, key, input, settings, source)
+		if err != nil {
+			writeHoldError(c, err)
+			return
+		}
+		status := http.StatusOK
+		if created {
+			status = http.StatusCreated
+		}
+		c.JSON(status, gin.H{"data": reply, "meta": gin.H{"server_now": reply.ServerNow}})
+	}))
+	return nil
+}
+
+func writeHoldError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Usaha, acara, atau slot tidak tersedia.", nil)
+	case errors.Is(err, ErrHoldInput):
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa usaha, acara, stand, slot, dan versi kebijakan.", nil)
+	case errors.Is(err, ErrIdempotencyMismatch):
+		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Kunci ini sudah dipakai untuk pengajuan lain.", nil)
+	case errors.Is(err, ErrNotBookable):
+		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_BOOKABLE", "Stand atau slot belum dapat dipesan.", nil)
+	case errors.Is(err, ErrStandUnavailable):
+		httpapi.Error(c, http.StatusConflict, "STAND_UNAVAILABLE", "Stand sudah dialokasikan pada slot ini.", nil)
+	case errors.Is(err, ErrQuotaFull):
+		httpapi.Error(c, http.StatusConflict, "CATEGORY_QUOTA_FULL", "Kuota kategori usaha sudah penuh.", nil)
+	case errors.Is(err, ErrPolicyChanged):
+		httpapi.Error(c, http.StatusConflict, "REFUND_POLICY_CHANGED", "Muat ulang dan tinjau kebijakan refund terbaru.", nil)
+	case errors.Is(err, ErrHoldLimit):
+		httpapi.Error(c, http.StatusTooManyRequests, "HOLD_LIMIT_REACHED", "Batas hold aktif tercapai.", nil)
+	case errors.Is(err, ErrHoldUnavailable):
+		httpapi.Error(c, http.StatusServiceUnavailable, "HOLD_UNAVAILABLE", "Layanan hold belum tersedia.", nil)
+	default:
+		httpapi.LogInternalError(c, "booking hold failed", err)
+		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Hold belum dapat dibuat.", nil)
+	}
+}
+
 func (s Store) getBooking(c *gin.Context, account auth.Account) {
 	id := c.Param("id")
 	if !httpapi.ValidID(id) {
