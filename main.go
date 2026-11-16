@@ -96,6 +96,10 @@ func run(ctx context.Context) error {
 		api.POST("/auth/login", unavailable)
 		api.POST("/auth/refresh", unavailable)
 		api.POST("/auth/logout", unavailable)
+		api.POST("/auth/forgot-password", unavailable)
+		api.POST("/auth/reset-password", unavailable)
+		api.POST("/auth/verify-email", unavailable)
+		api.POST("/auth/resend-verification", unavailable)
 		api.GET("/me", unavailable)
 	}
 

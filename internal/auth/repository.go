@@ -115,7 +115,8 @@ func (r repository) check(ctx context.Context) error {
 	err := r.db.QueryRow(ctx, `
 		SELECT to_regclass('users') IS NOT NULL
 		AND to_regclass('sessions') IS NOT NULL
-		AND to_regclass('session_refresh_tokens') IS NOT NULL`).Scan(&tablesPresent)
+		AND to_regclass('session_refresh_tokens') IS NOT NULL
+		AND to_regclass('auth_action_tokens') IS NOT NULL`).Scan(&tablesPresent)
 	if err != nil {
 		return err
 	}
