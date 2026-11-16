@@ -75,7 +75,17 @@ Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `a
 
 Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
 
-Untuk mengaktifkan quote dan hold 15 menit, terapkan migration, tambahkan versi kebijakan yang disetujui ke `hold_policy_versions` melalui role pemilik database, lalu jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas hold aktif per akun yang disetujui. API menggunakan versi kebijakan terbaru yang sudah berlaku, dan mengembalikan 503 bila belum ada versi. Kosongkan batas dan jalankan skrip role dengan nilai bawaan `false` untuk menonaktifkan quote/hold dan mencabut grant tambahan.
+## Mengaktifkan quote dan hold
+
+Setelah migration, pasang kebijakan booking yang disetujui dengan role pemilik database.
+
+```bash
+DATABASE_URL="$MIGRATION_DATABASE_URL" go run . hold-policy /path/to/policy.json
+```
+
+Pada deployment, ganti `go run .` dengan `./tenantku`. File JSON berisi `version`, `effective_at` dalam format RFC 3339 dengan zona waktu, `platform_fee` dan `provider_fee` dalam rupiah bulat, `refund_terms` untuk tenant, serta objek `refund_policy` yang disimpan di snapshot booking. Isi kedua fee secara eksplisit, termasuk jika disepakati bernilai nol. Menjalankan perintah ulang dengan isi yang sama aman. Perubahan kebijakan memakai versi dan waktu efektif baru.
+
+Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas per akun yang disetujui. Hold berlaku 15 menit atau sampai slot berakhir, mana yang lebih dulu. API membaca versi terbaru yang sudah berlaku dan mengembalikan 503 bila belum ada. Untuk menonaktifkan quote dan hold, kosongkan batas dan jalankan skrip role dengan nilai bawaan `false`.
 
 ## Verifikasi lokal
 
