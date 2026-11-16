@@ -1342,7 +1342,7 @@ paths:
       summary: Simpan revisi denah penuh
       description: Pemilik organisasi acara. Menyimpan denah sebagai revisi baru setelah memvalidasi batas grid,
         tumpang tindih, kode unik, dan kategori. Stand dengan hold, offer, atau reservasi aktif tidak boleh dihapus,
-        dipindah, diubah ukuran, atau dinonaktifkan (STAND_HAS_BOOKING). Acara selesai atau dibatalkan ditolak
+        dipindah, diubah ukuran, kode, atau bloknya, maupun dinonaktifkan (STAND_HAS_BOOKING). Acara selesai atau dibatalkan ditolak
         (EVENT_CLOSED). Harga stand diatur lewat PUT /events/{id}/pricing.
       x-implementation-status: implemented
       security:
