@@ -225,6 +225,8 @@ func writeResult(c *gin.Context, status int, data any, err error) {
 		httpapi.Success(c, status, data)
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Profil tidak ditemukan.", nil)
+	case errors.Is(err, errBusinessAlreadyExists):
+		httpapi.Error(c, http.StatusConflict, "BUSINESS_ALREADY_EXISTS", "Akun ini sudah memiliki profil usaha.", nil)
 	case errors.As(err, &dbError) && dbError.ConstraintName == "businesses_category_id_fkey":
 		validate(c, map[string]string{"category_id": "Pilih kategori usaha yang tersedia."})
 	default:

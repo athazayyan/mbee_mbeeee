@@ -397,7 +397,7 @@ paths:
       x-implementation-status: implemented
       security:
       - AccessCookie: []
-      description: Pemilik pertama diambil dari sesi dan dicatat dalam transaksi yang sama.
+      description: Pemilik diambil dari sesi dan dicatat dalam transaksi yang sama. Akun yang sudah memiliki profil usaha menerima 409 BUSINESS_ALREADY_EXISTS.
       requestBody:
         required: true
         content:
@@ -416,6 +416,7 @@ paths:
                   meta: {$ref: '#/components/schemas/EmptyMeta'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         '503': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}

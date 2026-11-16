@@ -2,11 +2,14 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var errBusinessAlreadyExists = errors.New("account already owns a business")
 
 type Store struct {
 	DB *pgxpool.Pool
@@ -69,17 +72,36 @@ func (s Store) categories(ctx context.Context) ([]category, error) {
 }
 
 func (s Store) createBusiness(ctx context.Context, userID, name, categoryID string) (business, error) {
-	row := s.DB.QueryRow(ctx, `
-		WITH created AS (
-			INSERT INTO businesses (owner_id, name, category_id) VALUES ($1, $2, $3)
-			RETURNING id, name, category_id
-		), joined AS (
-			INSERT INTO memberships (user_id, business_id, role)
-			SELECT $1, id, 'owner' FROM created RETURNING business_id
-		)
-		SELECT id, name, category_id FROM created JOIN joined ON business_id = id
-	`, userID, name, categoryID)
-	return scanBusiness(row)
+	var created business
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		// Lock per owner before reading, including for accounts created under the old rule.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(
+			hashtextextended('tenantku.identity.business:' || $1::uuid::text, 0))`, userID); err != nil {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM businesses WHERE owner_id = $1
+		)`, userID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return errBusinessAlreadyExists
+		}
+		var err error
+		created, err = scanBusiness(tx.QueryRow(ctx, `
+			WITH created AS (
+				INSERT INTO businesses (owner_id, name, category_id) VALUES ($1, $2, $3)
+				RETURNING id, name, category_id
+			), joined AS (
+				INSERT INTO memberships (user_id, business_id, role)
+				SELECT $1, id, 'owner' FROM created RETURNING business_id
+			)
+			SELECT id, name, category_id FROM created JOIN joined ON business_id = id
+		`, userID, name, categoryID))
+		return err
+	})
+	return created, err
 }
 
 func (s Store) business(ctx context.Context, userID, id string) (business, error) {
