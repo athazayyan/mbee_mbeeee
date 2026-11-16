@@ -94,6 +94,11 @@ GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, categ
     UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
     ON public.stands TO :"api_role";
 GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
+-- Produk dan stok usaha (E10): stok hanya berubah bersama baris inventory_movements.
+GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
+GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
+    UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at) ON public.products TO :"api_role";
+GRANT INSERT (business_id, product_id, delta, reason, note, actor_id) ON public.inventory_movements TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
