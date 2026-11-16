@@ -1155,7 +1155,7 @@ paths:
       operationId: listEventRevisions
       summary: Baca histori usulan revisi acara
       description: Hanya pemilik organisasi. Mengembalikan snapshot sebelum dan sesudah serta jumlah booking aktif pada saat usulan.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1181,7 +1181,7 @@ paths:
       operationId: proposeEventRevision
       summary: Ajukan perubahan material acara dengan booking aktif
       description: Pemilik mencatat usulan untuk jadwal, zona waktu, lokasi, atau syarat pada acara terbit atau berlangsung. Usulan menyimpan hubungan dengan booking terdampak. Perubahan acara, persetujuan tenant, pemberitahuan, dan refund memiliki alur terpisah.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1207,7 +1207,7 @@ paths:
       operationId: applyEventRevision
       summary: Terapkan usulan revisi yang disetujui tenant
       description: Pemilik organisasi menerapkan usulan yang masih sesuai dengan acara. Semua booking aktif harus memiliki persetujuan untuk usulan ini. Transaksi memperbarui acara dan slot, mencatat penerapan, serta menutup usulan lama. Pengiriman ulang mengembalikan kondisi acara saat ini.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1942,7 +1942,7 @@ paths:
       operationId: listBookingEventRevisions
       summary: Baca usulan revisi yang berdampak pada booking
       description: Hanya pemilik usaha pada booking. Mengembalikan usulan yang mencatat booking tersebut sebagai terdampak, dari yang terbaru. Snapshot menunjukkan usulan dan tidak mengubah booking.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1973,7 +1973,7 @@ paths:
       operationId: decideBookingEventRevision
       summary: Catat keputusan tenant atas usulan revisi acara
       description: Pemilik usaha dapat mencatat satu keputusan untuk booking aktif yang terdampak. Mengulang pilihan yang sama mengembalikan keputusan semula. Aksi ini hanya mencatat keputusan tenant.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:

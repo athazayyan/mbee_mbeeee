@@ -64,8 +64,6 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/organizations/:id/events/:event_id", sessions.WithAccount(s.getEvent))
 	api.GET("/organizations/:id/event-history", sessions.WithAccount(s.listHistoricalEvents))
 	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
-	api.GET("/events/:id/revisions", sessions.WithAccount(s.listRevisions))
-	api.GET("/bookings/:id/event-revisions", sessions.WithAccount(s.listBookingRevisions))
 	api.GET("/events", s.listPublicEvents)
 	api.GET("/events/:id", s.getPublicEvent)
 	api.GET("/events/:id/layout", s.getPublicLayout)
@@ -81,9 +79,6 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.POST("/events/:id/cancel", sessions.WithAccount(s.cancelEvent))
 	mutations.PUT("/events/:id/pricing", sessions.WithAccount(s.replacePricing))
 	mutations.POST("/events/:id/pricing/preview", sessions.WithAccount(s.previewPrice))
-	mutations.POST("/events/:id/revisions", sessions.WithAccount(s.proposeRevision))
-	mutations.POST("/events/:id/revisions/:revision_id/apply", sessions.WithAccount(s.applyEventRevision))
-	mutations.PUT("/bookings/:id/event-revisions/:revision_id/decision", sessions.WithAccount(s.decideBookingRevision))
 	mutations.PUT("/events/:id/layout", sessions.WithAccount(s.replaceLayout))
 }
 
@@ -288,7 +283,7 @@ func writeError(c *gin.Context, err error) {
 	case errors.Is(err, errPricingClosed):
 		httpapi.Error(c, http.StatusConflict, "EVENT_PRICING_CLOSED", "Harga acara sudah tidak dapat diubah.", nil)
 	case errors.Is(err, errRevisionRequired):
-		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Perubahan material perlu diajukan sebagai revisi karena acara memiliki booking aktif.", nil)
+		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Jadwal, lokasi, dan perubahan material lainnya dikunci saat acara memiliki booking aktif.", nil)
 	case errors.Is(err, errRevisionUnavailable):
 		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_UNAVAILABLE", "Revisi tersedia untuk acara terbit atau berlangsung yang memiliki booking aktif.", nil)
 	case errors.Is(err, errIdempotencyKeyMismatch):
