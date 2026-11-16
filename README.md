@@ -85,7 +85,7 @@ DATABASE_URL="$MIGRATION_DATABASE_URL" go run . hold-policy /path/to/policy.json
 
 Pada deployment, ganti `go run .` dengan `./tenantku`. File JSON berisi `version`, `effective_at` dalam format RFC 3339 dengan zona waktu, `platform_fee` dan `provider_fee` dalam rupiah bulat, `refund_terms` untuk tenant, serta objek `refund_policy` yang disimpan di snapshot booking. Isi kedua fee secara eksplisit, termasuk jika disepakati bernilai nol. Menjalankan perintah ulang dengan isi yang sama aman. Perubahan kebijakan memakai versi dan waktu efektif baru.
 
-Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas per akun yang disetujui. Untuk durasi, isi `BOOKING_HOLD_DURATION` dalam format seperti `15m`. Nilai bawaan 15 menit. Hold berakhir saat durasi habis atau slot berakhir, mana yang lebih dulu. Perubahan durasi berlaku untuk hold baru. API membaca versi kebijakan terbaru yang sudah berlaku dan mengembalikan 503 bila belum ada. Untuk menonaktifkan quote dan hold, kosongkan batas dan jalankan skrip role dengan nilai bawaan `false`.
+Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS=1` untuk mengizinkan satu hold aktif per akun dalam satu acara. Durasi bawaan adalah 30 menit. Isi `BOOKING_HOLD_DURATION` jika perlu mengatur durasi untuk pengujian. Hold berakhir saat durasi habis atau slot berakhir, mana yang lebih dulu. Perubahan durasi berlaku untuk hold baru. API membaca versi kebijakan terbaru yang sudah berlaku dan mengembalikan 503 bila belum ada. Untuk menonaktifkan quote dan hold, kosongkan batas dan jalankan skrip role dengan nilai bawaan `false`.
 
 ## Pembayaran sandbox
 
