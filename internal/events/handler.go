@@ -65,6 +65,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/organizations/:id/event-history", sessions.WithAccount(s.listHistoricalEvents))
 	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
 	api.GET("/events/:id/revisions", sessions.WithAccount(s.listRevisions))
+	api.GET("/events/:id/layout", s.getPublicLayout)
+	api.GET("/organizations/:id/events/:event_id/layout", sessions.WithAccount(s.getOrganizerLayout))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -77,6 +79,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.PUT("/events/:id/pricing", sessions.WithAccount(s.replacePricing))
 	mutations.POST("/events/:id/pricing/preview", sessions.WithAccount(s.previewPrice))
 	mutations.POST("/events/:id/revisions", sessions.WithAccount(s.proposeRevision))
+	mutations.PUT("/events/:id/layout", sessions.WithAccount(s.replaceLayout))
 }
 
 func (s Store) listEvents(c *gin.Context, account auth.Account) {
@@ -265,6 +268,9 @@ func writeEvent(c *gin.Context, status int, data event, err error) {
 }
 
 func writeError(c *gin.Context, err error) {
+	if writeLayoutError(c, err) {
+		return
+	}
 	var fields fieldErrors
 	var dbError *pgconn.PgError
 	switch {
