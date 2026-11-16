@@ -2619,9 +2619,11 @@ paths:
     post:
       tags: [Produk dan kasir]
       operationId: openPosSession
-      summary: '[Rencana] Buka sesi kasir'
-      description: Tenant atau kasir berizin. Perangkat dan sesi harus tercatat sebelum sync.
-      x-implementation-status: planned
+      summary: Buka sesi kasir
+      description: Semua anggota usaha. device_id dibuat dan disimpan perangkat kasir. Bila perangkat sudah punya sesi
+        terbuka untuk acara yang sama, sesi itu dikembalikan dengan 200; sesi terbuka untuk acara lain ditutup lalu
+        sesi baru dibuat dengan 201. Sesi harus tercatat sebelum sync.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -2635,6 +2637,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/PosSessionInput'}
       responses:
+        '200':
+          description: Sesi terbuka yang sudah ada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PosSession'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
         '201':
           description: Berhasil
           content:
@@ -2675,10 +2687,15 @@ paths:
     post:
       tags: [Produk dan kasir]
       operationId: syncSales
-      summary: '[Rencana] Sinkronkan transaksi offline'
-      description: Dedupe per usaha dan sale_id. ID sama dengan payload berbeda menghasilkan SYNC_PAYLOAD_CONFLICT. HTTP 200 membawa
-        hasil per item.
-      x-implementation-status: planned
+      summary: Sinkronkan transaksi kasir
+      description: Semua anggota usaha. Tiap transaksi diproses dalam transaksi database sendiri dan HTTP 200 membawa
+        hasil per item. Dedupe per usaha dan sale_id memakai sidik kanonik buatan server; ID sama dengan isi berbeda
+        menghasilkan SYNC_PAYLOAD_CONFLICT. Server menghitung ulang subtotal (quantity x unit_price - discount) dan
+        total (jumlah subtotal - discount). Stok produk dikurangi lewat mutasi 'sale' dan boleh menjadi negatif.
+        Kode rejected - INVALID_SALE, INVALID_ITEMS, INVALID_TOTAL, INVALID_TIMESTAMP (lebih dari 24 jam di masa depan),
+        UNSUPPORTED_SCHEMA_VERSION, BUSINESS_FORBIDDEN, UNKNOWN_SESSION, UNKNOWN_EVENT, UNKNOWN_PRODUCT,
+        SYNC_PAYLOAD_CONFLICT. retryable berarti kirim ulang nanti tanpa mengubah isi. Body di atas 1 MiB ditolak 413.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       requestBody:
@@ -2803,9 +2820,10 @@ paths:
     get:
       tags: [Produk dan kasir]
       operationId: listSales
-      summary: '[Rencana] Daftar penjualan usaha'
-      description: Tenant berhak atas usaha.
-      x-implementation-status: planned
+      summary: Daftar penjualan usaha
+      description: Semua anggota usaha. Urut dari waktu transaksi di perangkat (client_created_at) terbaru. from
+        inklusif dan to eksklusif. Item memuat snapshot nama, harga, dan modal saat transaksi.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4828,9 +4846,10 @@ components:
       type: object
       required: [product_id, product_name, quantity, unit_price, subtotal]
       properties:
+        id: {type: string, format: uuid, description: Hanya pada respons; dipakai untuk retur.}
         product_id: {type: string, format: uuid}
-        product_name: {type: string, minLength: 1}
-        quantity: {type: integer, minimum: 1}
+        product_name: {type: string, minLength: 1, maxLength: 120}
+        quantity: {type: integer, minimum: 1, maximum: 10000}
         unit_price: {$ref: '#/components/schemas/Rupiah'}
         unit_cost: {$ref: '#/components/schemas/Rupiah'}
         discount: {$ref: '#/components/schemas/Rupiah'}
@@ -4846,9 +4865,9 @@ components:
         session_id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
         client_created_at: {type: string, format: date-time}
-        schema_version: {type: integer, minimum: 1}
-        payload_hash: {type: string, minLength: 1}
-        items: {type: array, items: {$ref: '#/components/schemas/SaleItem'}, minItems: 1}
+        schema_version: {type: integer, enum: [1]}
+        payload_hash: {type: string, minLength: 1, maxLength: 128}
+        items: {type: array, items: {$ref: '#/components/schemas/SaleItem'}, minItems: 1, maxItems: 100}
         currency: {type: string, enum: [IDR]}
         method: {type: string, enum: [cash, external]}
         discount: {$ref: '#/components/schemas/Rupiah'}

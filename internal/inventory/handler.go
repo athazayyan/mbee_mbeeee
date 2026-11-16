@@ -29,6 +29,7 @@ func (fieldErrors) Error() string { return "product validation failed" }
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/businesses/:id/products", sessions.WithAccount(s.listProducts))
+	api.GET("/businesses/:id/sales", sessions.WithAccount(s.listSalesHandler))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -36,6 +37,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.POST("/businesses/:id/products", sessions.WithAccount(s.createProduct))
 	mutations.PATCH("/products/:id", sessions.WithAccount(s.updateProduct))
 	mutations.POST("/products/:id/stock-movements", sessions.WithAccount(s.moveStock))
+	mutations.POST("/businesses/:id/pos-sessions", sessions.WithAccount(s.openPosSession))
+	mutations.POST("/sync/sales", sessions.WithAccount(s.syncSales))
 }
 
 func validRupiah(value *int64) bool { return value == nil || (*value >= 0 && *value <= maxRupiah) }
@@ -250,17 +253,17 @@ func writeError(c *gin.Context, err error) {
 	var dbError *pgconn.PgError
 	switch {
 	case errors.As(err, &fields):
-		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian produk.", fields)
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.", fields)
 	case errors.Is(err, pgx.ErrNoRows):
-		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Produk atau usaha tidak ditemukan.", nil)
+		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Data atau usaha tidak ditemukan.", nil)
 	case errors.Is(err, errStockOverflow):
-		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian produk.",
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.",
 			map[string]string{"delta": "Stok produk harus tetap di antara -1.000.000 dan 1.000.000."})
 	case errors.As(err, &dbError) && dbError.ConstraintName == "products_business_sku_idx":
 		httpapi.Error(c, http.StatusConflict, "SKU_IN_USE", "SKU sudah dipakai produk lain di usaha ini.",
 			map[string]string{"sku": "Gunakan SKU lain."})
 	case errors.As(err, &dbError) && dbError.ConstraintName == "products_category_id_fkey":
-		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian produk.",
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.",
 			map[string]string{"category_id": "Pilih kategori yang tersedia."})
 	default:
 		httpapi.LogInternalError(c, "product request failed", err)
