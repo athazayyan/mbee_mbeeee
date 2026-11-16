@@ -696,6 +696,60 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /organizations/{id}/event-history:
+    parameters:
+    - {$ref: '#/components/parameters/IdentityResourceID'}
+    get:
+      tags: [Acara dan katalog]
+      operationId: listHistoricalEvents
+      summary: Baca catatan acara historis organisasi
+      description: Anggota organisasi membaca catatan yang dilaporkan manual. Hasil memiliki sumber self-reported dan diurutkan berdasarkan waktu mulai.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Halaman catatan historis
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/HistoricalEvent'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Acara dan katalog]
+      operationId: recordHistoricalEvent
+      summary: Catat acara masa lalu sebagai self-reported
+      description: Pemilik organisasi mencatat metadata acara yang sudah selesai. Backend menetapkan label sumber dan waktu pencatatan. Riwayat manual disimpan terpisah dari acara operasional serta transaksi kasir.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HistoricalEventInput'}
+      responses:
+        '200': {$ref: '#/components/responses/HistoricalEvent'}
+        '201': {$ref: '#/components/responses/HistoricalEvent'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /organizations/{id}/events:
     get:
       tags: [Acara dan katalog]
@@ -3664,6 +3718,16 @@ components:
           schema:
             $ref: '#/components/schemas/Credentials'
   responses:
+    HistoricalEvent:
+      description: Catatan historis baru atau pengulangan idempoten
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: '#/components/schemas/HistoricalEvent'}
+              meta: {$ref: '#/components/schemas/EmptyMeta'}
     EventRevision:
       description: Usulan revisi baru atau hasil pengulangan idempoten
       content:
@@ -3936,6 +4000,31 @@ components:
         description: {type: string, maxLength: 3000}
         facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         terms: {type: string, maxLength: 6000}
+    HistoricalEventInput:
+      type: object
+      additionalProperties: false
+      required: [name, starts_at, ends_at, timezone, city, address]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 160}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        timezone: {type: string, minLength: 1, maxLength: 64}
+        city: {type: string, minLength: 1, maxLength: 120}
+        address: {type: string, minLength: 1, maxLength: 300}
+    HistoricalEvent:
+      type: object
+      required: [id, organization_id, source, reported_at, name, starts_at, ends_at, timezone, city, address]
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        source: {type: string, const: self-reported}
+        reported_at: {type: string, format: date-time}
+        name: {type: string}
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        timezone: {type: string}
+        city: {type: string}
+        address: {type: string}
     EventRevisionInput:
       type: object
       additionalProperties: false

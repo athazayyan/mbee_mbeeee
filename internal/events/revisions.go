@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	errRevisionRequired    = errors.New("material event changes require a revision")
-	errRevisionUnavailable = errors.New("event is not eligible for a revision")
-	errRevisionKeyMismatch = errors.New("revision key was already used for a different request")
+	errRevisionRequired       = errors.New("material event changes require a revision")
+	errRevisionUnavailable    = errors.New("event is not eligible for a revision")
+	errIdempotencyKeyMismatch = errors.New("idempotency key was already used for a different request")
 )
 
 const affectedBookings = `FROM bookings b WHERE b.event_id = $1 AND (
@@ -108,7 +108,7 @@ func (s Store) proposeRevision(c *gin.Context, account auth.Account) {
 		StartsAt: input.Changes.StartsAt, EndsAt: input.Changes.EndsAt, Timezone: input.Changes.Timezone,
 		City: input.Changes.City, Address: input.Changes.Address, Terms: input.Changes.Terms,
 	}
-	fields := validateEventInput(changes, false)
+	fields := validateEventInput(changes, false, false)
 	if changes == (eventInput{}) {
 		delete(fields, "name")
 		fields["changes"] = "Isi setidaknya satu perubahan material."
@@ -153,7 +153,7 @@ func (s Store) recordRevision(ctx context.Context, actor, id, key string, digest
 			WHERE event_id = $1 AND requested_by = $2 AND idempotency_key = $3`, id, actor, key).Scan(&revisionID, &previousDigest)
 		if err == nil {
 			if !bytes.Equal(previousDigest, digest) {
-				return errRevisionKeyMismatch
+				return errIdempotencyKeyMismatch
 			}
 			revision, err = scanRevision(tx.QueryRow(ctx, selectRevision+` WHERE r.id = $1`, revisionID))
 			return err

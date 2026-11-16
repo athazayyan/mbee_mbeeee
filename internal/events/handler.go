@@ -62,6 +62,7 @@ func existing[T any](input *T, current T) T {
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/organizations/:id/events", sessions.WithAccount(s.listEvents))
 	api.GET("/organizations/:id/events/:event_id", sessions.WithAccount(s.getEvent))
+	api.GET("/organizations/:id/event-history", sessions.WithAccount(s.listHistoricalEvents))
 	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
 	api.GET("/events/:id/revisions", sessions.WithAccount(s.listRevisions))
 	mutations := api.Group("")
@@ -69,6 +70,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 		mutations.Use(httpapi.RequireOrigin(origin))
 	}
 	mutations.POST("/organizations/:id/events", sessions.WithAccount(s.createEvent))
+	mutations.POST("/organizations/:id/event-history", sessions.WithAccount(s.recordHistoricalEvent))
 	mutations.PATCH("/events/:id", sessions.WithAccount(s.updateEvent))
 	mutations.POST("/events/:id/duplicate", sessions.WithAccount(s.duplicateEvent))
 	mutations.POST("/events/:id/cancel", sessions.WithAccount(s.cancelEvent))
@@ -147,14 +149,14 @@ func readEvent(c *gin.Context, create bool) (eventInput, bool) {
 	if !ok {
 		return input, false
 	}
-	if fields := validateEventInput(input, create); len(fields) > 0 {
+	if fields := validateEventInput(input, create, true); len(fields) > 0 {
 		writeError(c, fields)
 		return input, false
 	}
 	return input, true
 }
 
-func validateEventInput(input eventInput, create bool) fieldErrors {
+func validateEventInput(input eventInput, create, withSlug bool) fieldErrors {
 	fields := make(fieldErrors)
 	for _, field := range []struct {
 		name  string
@@ -167,6 +169,9 @@ func validateEventInput(input eventInput, create bool) fieldErrors {
 		{"city", input.City, 120},
 		{"address", input.Address, 300},
 	} {
+		if field.name == "slug" && !withSlug {
+			continue
+		}
 		if field.value == nil {
 			if create {
 				fields[field.name] = "Isian ini wajib."
@@ -261,8 +266,8 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Perubahan material perlu diajukan sebagai revisi karena acara memiliki booking aktif.", nil)
 	case errors.Is(err, errRevisionUnavailable):
 		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_UNAVAILABLE", "Revisi tersedia untuk acara terbit atau berlangsung yang memiliki booking aktif.", nil)
-	case errors.Is(err, errRevisionKeyMismatch):
-		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Gunakan key baru untuk usulan yang berbeda.", nil)
+	case errors.Is(err, errIdempotencyKeyMismatch):
+		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Gunakan key baru untuk permintaan yang berbeda.", nil)
 	case errors.As(err, &dbError) && dbError.ConstraintName == "events_slug_key":
 		httpapi.Error(c, http.StatusConflict, "SLUG_IN_USE", "Slug sudah digunakan.", map[string]string{"slug": "Gunakan slug lain."})
 	default:
