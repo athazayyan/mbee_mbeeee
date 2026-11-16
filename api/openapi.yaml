@@ -3967,13 +3967,226 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /plans:
+    get:
+      tags: [Admin]
+      operationId: listEventPlans
+      summary: Daftar paket acara
+      description: Publik. Paket per acara pada versi harga yang berlaku (PRD 9.1). Di atas kapasitas terbesar berlaku
+        paket Custom - harga paket terbesar ditambah custom_price_per_tenant per tenant tambahan.
+      x-implementation-status: implemented
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PlanCatalog'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        default: {$ref: '#/components/responses/Error'}
+  /plans/quote:
+    get:
+      tags: [Admin]
+      operationId: quoteEventPlan
+      summary: Paket yang cocok untuk kapasitas tenant
+      description: Publik. Memilih paket terkecil yang memuat kapasitas, atau Custom di atas kapasitas terbesar.
+      x-implementation-status: implemented
+      parameters:
+      - name: capacity
+        in: query
+        required: true
+        schema: {type: integer, minimum: 1, maximum: 100000}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PlanQuote'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '422':
+          description: Kapasitas tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/overview:
+    get:
+      tags: [Admin]
+      operationId: getAdminOverview
+      summary: Ringkasan platform
+      description: Khusus admin platform. Hitungan pengguna, usaha, organisasi, acara, booking, dan penjualan 7 hari.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminOverview'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Bukan admin platform
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/organizations:
+    get:
+      tags: [Admin]
+      operationId: listAdminOrganizations
+      summary: Daftar penyelenggara untuk verifikasi
+      description: Khusus admin platform. q mencari nama organisasi atau email pemilik. Urut dari terbaru.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: verification
+        in: query
+        required: false
+        schema: {type: string, enum: [verified, unverified]}
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminOrganization'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Bukan admin platform
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/organizations/{id}/verification:
+    post:
+      tags: [Admin]
+      operationId: setOrganizationVerification
+      summary: Verifikasi atau cabut verifikasi penyelenggara
+      description: Khusus admin platform. Alasan wajib dan dicatat di audit beserta status sebelum dan sesudah. Mengirim
+        status yang sama tidak menambah audit.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VerificationInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminOrganization'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Bukan admin platform
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Organisasi tidak ditemukan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: listAdminUsers
+      summary: Daftar pengguna
+      description: Khusus admin platform. q mencari email. Tidak menampilkan kata sandi atau sesi.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminUser'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Bukan admin platform
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /admin/audit:
     get:
       tags: [Admin]
       operationId: listAuditEvents
-      summary: '[Rencana] Baca log audit'
-      description: Admin berizin. Filter tidak mengungkap secret.
-      x-implementation-status: planned
+      summary: Baca log audit admin
+      description: Khusus admin platform. Urut dari terbaru. Filter action tersedia; actor_id, from, dan to belum
+        didukung. Filter tidak mengungkap secret.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4297,11 +4510,16 @@ components:
       allOf:
       - {$ref: '#/components/schemas/Account'}
       - type: object
-        required: [memberships]
+        required: [memberships, roles]
         properties:
           memberships:
             type: array
             items: {$ref: '#/components/schemas/Membership'}
+          roles:
+            type: array
+            description: Peran untuk menu app. tenant bila punya usaha, organizer bila anggota organisasi, admin bila
+              admin platform. Hak akses tetap diperiksa di tiap endpoint.
+            items: {type: string, enum: [tenant, organizer, admin]}
     Membership:
       type: object
       required: [subject_type, subject_id, name, role]
@@ -5317,15 +5535,84 @@ components:
         status: {type: string, enum: [pending_scan, ready, rejected]}
     AuditEvent:
       type: object
-      required: [id, action, occurred_at, request_id]
+      required: [id, actor_id, actor_email, action, resource_type, reason, occurred_at, request_id]
       properties:
         id: {type: string, format: uuid}
         actor_id: {type: string, format: uuid}
+        actor_email: {type: string, format: email}
         action: {type: string, minLength: 1}
+        resource_type: {type: string, minLength: 1}
         resource_id: {type: string, format: uuid}
         reason: {type: string, minLength: 1}
+        before: {type: object, additionalProperties: true}
+        after: {type: object, additionalProperties: true}
         occurred_at: {type: string, format: date-time}
         request_id: {type: string, format: uuid}
+    PlanCatalog:
+      type: object
+      required: [version_id, effective_at, custom_price_per_tenant, plans]
+      properties:
+        version_id: {type: integer}
+        effective_at: {type: string, format: date-time}
+        custom_price_per_tenant: {$ref: '#/components/schemas/Rupiah'}
+        plans:
+          type: array
+          items: {$ref: '#/components/schemas/PlanQuote'}
+    PlanQuote:
+      type: object
+      required: [code, name, capacity, price, price_per_tenant]
+      properties:
+        code: {type: string, description: Kode paket, atau custom di atas kapasitas terbesar.}
+        name: {type: string}
+        capacity: {type: integer, minimum: 1}
+        price: {$ref: '#/components/schemas/Rupiah'}
+        price_per_tenant: {$ref: '#/components/schemas/Rupiah'}
+    AdminOverview:
+      type: object
+      required: [users, users_verified, businesses, organizations, organizations_unverified, events_draft, events_published,
+        bookings_active, bookings_confirmed, sales_last_7_days, sales_revenue_last_7_days]
+      properties:
+        users: {type: integer}
+        users_verified: {type: integer}
+        businesses: {type: integer}
+        organizations: {type: integer}
+        organizations_unverified: {type: integer}
+        events_draft: {type: integer}
+        events_published: {type: integer}
+        bookings_active: {type: integer}
+        bookings_confirmed: {type: integer}
+        sales_last_7_days: {type: integer}
+        sales_revenue_last_7_days: {$ref: '#/components/schemas/Rupiah'}
+    AdminOrganization:
+      type: object
+      required: [id, name, verification_status, created_at, owner_email, events_total, events_published]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        verification_status: {type: string, enum: [unverified, verified]}
+        verified_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        owner_email: {type: string, format: email}
+        events_total: {type: integer}
+        events_published: {type: integer}
+    VerificationInput:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status: {type: string, enum: [verified, unverified]}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    AdminUser:
+      type: object
+      required: [id, email, email_verified, created_at, businesses, organizations, admin]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string, format: email}
+        email_verified: {type: boolean}
+        created_at: {type: string, format: date-time}
+        businesses: {type: integer}
+        organizations: {type: integer}
+        admin: {type: boolean}
     PaymentException:
       type: object
       required: [id, payment_id, code, status, created_at]
