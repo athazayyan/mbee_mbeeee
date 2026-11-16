@@ -4361,7 +4361,7 @@ components:
         terms: {type: string}
     EventRevision:
       type: object
-      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, created_at]
+      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, approved_bookings, declined_bookings, created_at]
       properties:
         id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
@@ -4371,6 +4371,8 @@ components:
         before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         affected_bookings: {type: integer, minimum: 1}
+        approved_bookings: {type: integer, minimum: 0}
+        declined_bookings: {type: integer, minimum: 0}
         created_at: {type: string, format: date-time}
     BookingEventRevision:
       type: object
