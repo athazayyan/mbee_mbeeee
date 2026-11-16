@@ -121,6 +121,10 @@ GRANT INSERT (business_id, sale_ref, type, reason, amount, created_by, idempoten
 GRANT INSERT (adjustment_id, sale_item_id, quantity) ON public.sale_adjustment_items TO :"api_role";
 GRANT INSERT (business_id, event_id, category, amount, occurred_at, note, created_by, idempotency_key, request_digest)
     ON public.expenses TO :"api_role";
+-- Perangkat kasir (E11): didaftarkan saat membuka sesi, dicabut atau dipulihkan oleh pemilik usaha.
+GRANT SELECT ON public.pos_devices TO :"api_role";
+GRANT INSERT (business_id, id, label, registered_by),
+    UPDATE (label, last_seen_at, last_synced_at, revoked_at, revoked_by, revoke_reason) ON public.pos_devices TO :"api_role";
 -- Kasir (E10): sesi per perangkat dan penjualan hasil sync; riwayat penjualan tidak pernah diubah langsung.
 GRANT SELECT ON public.pos_sessions, public.sales, public.sale_items TO :"api_role";
 GRANT INSERT (business_id, device_id, event_id, opened_by), UPDATE (closed_at) ON public.pos_sessions TO :"api_role";
