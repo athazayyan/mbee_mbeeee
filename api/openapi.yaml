@@ -862,6 +862,37 @@ paths:
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/publication-readiness:
+    get:
+      tags: [Acara dan katalog]
+      operationId: getPublicationReadiness
+      summary: '[Rencana] Periksa syarat publikasi draft'
+      description: Pemilik organisasi melihat kesiapan dan masalah publikasi yang ditemukan server. Endpoint publish memeriksa ulang syarat sebelum mengubah status.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      responses:
+        '200':
+          description: Status dan kendala publikasi draft
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [ready, fields]
+                    properties:
+                      ready: {type: boolean}
+                      fields: {type: object, additionalProperties: {type: string}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/publish:
     post:
       tags: [Acara dan katalog]

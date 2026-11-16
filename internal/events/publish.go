@@ -16,14 +16,32 @@ import (
 
 type PublishLayout interface {
 	// ReadyToPublish checks the current layout and saleable inventory for every
-	// supplied slot. Layout writes must acquire the same event row lock.
+	// supplied slot, including in a read-only transaction. Layout writes must
+	// acquire the same event row lock as publication.
 	ReadyToPublish(ctx context.Context, tx pgx.Tx, eventID string, slotIDs []string) (bool, error)
+}
+
+type publicationReadiness struct {
+	Ready  bool        `json:"ready"`
+	Fields fieldErrors `json:"fields"`
 }
 
 func (s Store) PublishRoutes(api *gin.RouterGroup, sessions *auth.Service, origin string, layout PublishLayout) error {
 	if s.DB == nil || sessions == nil || origin == "" || layout == nil {
 		return errors.New("publish requires a configured event layout source")
 	}
+	api.GET("/events/:id/publication-readiness", sessions.WithAccount(func(c *gin.Context, account auth.Account) {
+		id := c.Param("id")
+		if !validResource(c, id) {
+			return
+		}
+		result, err := s.publicationReadiness(c.Request.Context(), account.ID, id, layout)
+		if err != nil {
+			writeError(c, err)
+			return
+		}
+		httpapi.Success(c, http.StatusOK, result)
+	}))
 	api.POST("/events/:id/publish", httpapi.RequireOrigin(origin), sessions.WithAccount(func(c *gin.Context, account auth.Account) {
 		id := c.Param("id")
 		if !validResource(c, id) {
@@ -38,6 +56,34 @@ func (s Store) PublishRoutes(api *gin.RouterGroup, sessions *auth.Service, origi
 		writeEvent(c, http.StatusOK, data, err)
 	}))
 	return nil
+}
+
+func (s Store) publicationReadiness(ctx context.Context, actor, id string, layout PublishLayout) (publicationReadiness, error) {
+	result := publicationReadiness{Fields: make(fieldErrors)}
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		current, err := scanEvent(tx.QueryRow(ctx, `SELECT `+eventColumns+` FROM events e
+			JOIN memberships m ON m.organization_id = e.organization_id
+			WHERE e.id = $1 AND m.user_id = $2 AND m.role = 'owner'`, id, actor))
+		if err != nil {
+			return err
+		}
+		if current.Status != "draft" {
+			return errDraftRequired
+		}
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT transaction_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
+		err = checkPublication(ctx, tx, current, layout, now)
+		var fields fieldErrors
+		if errors.As(err, &fields) {
+			result.Fields = fields
+			return nil
+		}
+		result.Ready = err == nil
+		return err
+	})
+	return result, err
 }
 
 func (s Store) publishDraft(ctx context.Context, actor, id string, layout PublishLayout) (event, error) {
