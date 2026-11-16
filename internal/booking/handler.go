@@ -2,7 +2,6 @@ package booking
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -71,6 +70,6 @@ func writeReadError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Booking atau usaha tidak ditemukan.", nil)
 		return
 	}
-	slog.Error("booking read failed", "error", err, "path", c.FullPath())
+	httpapi.LogInternalError(c, "booking read failed", err)
 	httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Booking belum dapat dimuat.", nil)
 }

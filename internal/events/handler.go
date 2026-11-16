@@ -2,7 +2,6 @@ package events
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -255,7 +254,7 @@ func writeError(c *gin.Context, err error) {
 	case errors.As(err, &dbError) && dbError.ConstraintName == "events_slug_key":
 		httpapi.Error(c, http.StatusConflict, "SLUG_IN_USE", "Slug sudah digunakan.", map[string]string{"slug": "Gunakan slug lain."})
 	default:
-		slog.Error("event request failed", "error", err, "path", c.FullPath())
+		httpapi.LogInternalError(c, "event request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Acara belum dapat diproses.", nil)
 	}
 }

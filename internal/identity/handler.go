@@ -2,7 +2,6 @@ package identity
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -224,7 +223,7 @@ func writeResult(c *gin.Context, status int, data any, err error) {
 	case errors.As(err, &dbError) && dbError.ConstraintName == "businesses_category_id_fkey":
 		validate(c, map[string]string{"category_id": "Pilih kategori usaha yang tersedia."})
 	default:
-		slog.Error("identity request failed", "error", err, "path", c.FullPath())
+		httpapi.LogInternalError(c, "identity request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Profil belum dapat diproses.", nil)
 	}
 }

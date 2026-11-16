@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +25,7 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Fatal("could not load .env")
 	}
@@ -53,7 +56,8 @@ func run(ctx context.Context) error {
 		port = "8080"
 	}
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(httpapi.RequestID, httpapi.LogRequests, gin.CustomRecoveryWithWriter(io.Discard, httpapi.RecoverRequest))
 	if os.Getenv("API_DOCS_ENABLED") == "true" {
 		apidocs.Routes(router)
 	}
@@ -65,7 +69,7 @@ func run(ctx context.Context) error {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	api := router.Group("/api/v1", httpapi.RequestID, func(c *gin.Context) {
+	api := router.Group("/api/v1", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 	})
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {

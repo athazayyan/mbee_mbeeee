@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -193,7 +192,7 @@ func sendError(c *gin.Context, err error) {
 	case errors.Is(err, errSession):
 		httpapi.Error(c, http.StatusUnauthorized, "INVALID_SESSION", "Kredensial atau sesi tidak valid.", nil)
 	default:
-		slog.Error("auth request failed", "request_id", c.Writer.Header().Get("X-Request-ID"), "error", err)
+		httpapi.LogInternalError(c, "auth request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan. Coba lagi nanti.", nil)
 	}
 }
