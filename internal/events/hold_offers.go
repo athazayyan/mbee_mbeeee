@@ -87,7 +87,7 @@ func (source HoldOfferSource) ResolveOffer(ctx context.Context, tx pgx.Tx, reque
 	if err != nil {
 		return booking.Offer{}, err
 	}
-	quote, err := active.Rules.quote(request.SlotID, confirmed, int32(len(ids)))
+	quote, err := active.Rules.quote(priceTarget{slotID: request.SlotID, stand: selected}, confirmed, int32(len(ids)))
 	if err != nil {
 		var fields fieldErrors
 		if errors.As(err, &fields) && fields["event_slot_id"] != "" {

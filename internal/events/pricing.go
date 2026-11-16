@@ -2,7 +2,6 @@ package events
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -16,14 +15,13 @@ import (
 
 type priceInput struct {
 	priceRules
-	EffectiveAt *time.Time        `json:"effective_at"`
-	StandPrices []json.RawMessage `json:"stand_prices"`
-	BlockPrices []json.RawMessage `json:"block_prices"`
+	EffectiveAt *time.Time `json:"effective_at"`
 }
 
 type pricePreviewInput struct {
 	Rules          priceInput `json:"rules"`
 	EventSlotID    string     `json:"event_slot_id"`
+	StandID        *string    `json:"stand_id"`
 	ConfirmedCount *int32     `json:"confirmed_count"`
 	Capacity       int32      `json:"capacity"`
 }
@@ -52,17 +50,6 @@ const activePricingQuery = `SELECT event_id, revision::text, effective_at, rules
 	FROM event_pricing_versions WHERE event_id = $1
 	AND effective_at <= COALESCE($2::timestamptz, transaction_timestamp())
 	ORDER BY effective_at DESC, revision DESC LIMIT 1`
-
-func (input *priceInput) fields() fieldErrors {
-	fields := input.priceRules.validate()
-	if len(input.StandPrices) != 0 {
-		fields["stand_prices"] = "Harga per stand tersedia setelah denah terhubung."
-	}
-	if len(input.BlockPrices) != 0 {
-		fields["block_prices"] = "Harga per blok tersedia setelah denah terhubung."
-	}
-	return fields
-}
 
 func (s Store) getPricing(c *gin.Context, account auth.Account) {
 	id := c.Param("id")
@@ -106,7 +93,7 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 	if !ok {
 		return
 	}
-	if fields := input.fields(); len(fields) != 0 {
+	if fields := input.priceRules.validate(); len(fields) != 0 {
 		writeError(c, fields)
 		return
 	}
@@ -120,7 +107,7 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 		if value.Status != "draft" {
 			return errDraftRequired
 		}
-		if err := validatePriceReferences(ctx, tx, id, input.priceRules, ""); err != nil {
+		if _, err := s.validatePriceReferences(ctx, tx, id, input.priceRules, "", ""); err != nil {
 			return err
 		}
 		var now time.Time
@@ -155,10 +142,17 @@ func (s Store) previewPrice(c *gin.Context, account auth.Account) {
 	if !ok {
 		return
 	}
-	fields := input.Rules.fields()
+	fields := input.Rules.priceRules.validate()
 	input.EventSlotID = strings.ToLower(input.EventSlotID)
 	if !httpapi.ValidID(input.EventSlotID) {
 		fields["event_slot_id"] = "Pilih slot acara yang valid."
+	}
+	standID := ""
+	if input.StandID != nil {
+		standID = strings.ToLower(*input.StandID)
+		if !httpapi.ValidID(standID) {
+			fields["stand_id"] = "Pilih stand yang valid."
+		}
 	}
 	if input.ConfirmedCount == nil {
 		fields["confirmed_count"] = "Isi jumlah stand terkonfirmasi untuk simulasi."
@@ -171,17 +165,20 @@ func (s Store) previewPrice(c *gin.Context, account auth.Account) {
 		return
 	}
 	ctx := c.Request.Context()
+	var target priceTarget
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if _, err := lockOwnedEvent(ctx, tx, account.ID, id); err != nil {
 			return err
 		}
-		return validatePriceReferences(ctx, tx, id, input.Rules.priceRules, input.EventSlotID)
+		var err error
+		target, err = s.validatePriceReferences(ctx, tx, id, input.Rules.priceRules, input.EventSlotID, standID)
+		return err
 	})
 	if err != nil {
 		writeError(c, err)
 		return
 	}
-	quote, err := input.Rules.priceRules.quote(input.EventSlotID, *input.ConfirmedCount, input.Capacity)
+	quote, err := input.Rules.priceRules.quote(target, *input.ConfirmedCount, input.Capacity)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -207,32 +204,39 @@ func loadPriceVersion(ctx context.Context, tx pgx.Tx, query string, args ...any)
 	return &version, err
 }
 
-func validatePriceReferences(ctx context.Context, tx pgx.Tx, eventID string, rules priceRules, previewSlot string) error {
+func (s Store) validatePriceReferences(ctx context.Context, tx pgx.Tx, eventID string, rules priceRules, previewSlot, standID string) (priceTarget, error) {
 	slots, err := pricingSlots(ctx, tx, eventID)
 	if err != nil {
-		return err
+		return priceTarget{}, err
 	}
 	known := make(map[string]bool, len(slots))
 	for _, slot := range slots {
 		known[slot.ID] = true
 	}
 	if previewSlot != "" && !known[previewSlot] {
-		return fieldErrors{"event_slot_id": "Slot tidak tersedia pada acara ini."}
+		return priceTarget{}, fieldErrors{"event_slot_id": "Slot tidak tersedia pada acara ini."}
 	}
 	for _, slot := range rules.SlotPrices {
 		if !known[slot.EventSlotID] {
-			return fieldErrors{"slot_prices": "Gunakan slot yang terdaftar pada acara ini."}
+			return priceTarget{}, fieldErrors{"slot_prices": "Gunakan slot yang terdaftar pada acara ini."}
 		}
 	}
-	if len(rules.CategoryQuotas) == 0 {
+	if err := checkPricingCategories(ctx, tx, rules.CategoryQuotas); err != nil {
+		return priceTarget{}, err
+	}
+	return s.validatePricingInventory(ctx, tx, eventID, slots, rules, previewSlot, standID)
+}
+
+func checkPricingCategories(ctx context.Context, tx pgx.Tx, quotas []categoryQuota) error {
+	if len(quotas) == 0 {
 		return nil
 	}
-	categories := make([]string, 0, len(rules.CategoryQuotas))
-	for _, quota := range rules.CategoryQuotas {
+	categories := make([]string, 0, len(quotas))
+	for _, quota := range quotas {
 		categories = append(categories, quota.CategoryID)
 	}
 	var count int
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM business_categories
+	err := tx.QueryRow(ctx, `SELECT count(*) FROM business_categories
 		WHERE id = ANY($1::text[]::uuid[])`, categories).Scan(&count)
 	if err != nil {
 		return err
@@ -241,4 +245,55 @@ func validatePriceReferences(ctx context.Context, tx pgx.Tx, eventID string, rul
 		return fieldErrors{"category_quotas": "Pilih kategori usaha yang tersedia."}
 	}
 	return nil
+}
+
+func (s Store) validatePricingInventory(ctx context.Context, tx pgx.Tx, eventID string, slots []pricedSlot, rules priceRules, previewSlot, standID string) (priceTarget, error) {
+	target := priceTarget{slotID: previewSlot}
+	hasOverrides := len(rules.StandPrices) > 0 || len(rules.BlockPrices) > 0
+	if !hasOverrides && standID == "" {
+		return target, nil
+	}
+	if s.PricingInventory == nil {
+		return target, fieldErrors{"layout": "Harga stand dan blok tersedia setelah denah terhubung."}
+	}
+	stands, blocks := make(map[string]bool), make(map[string]bool)
+	for _, slot := range slots {
+		if !hasOverrides && slot.ID != previewSlot {
+			continue
+		}
+		inventory, err := s.PricingInventory.ActiveStands(ctx, tx, eventID, slot.ID)
+		if err != nil {
+			return target, err
+		}
+		for index := range inventory {
+			stand := &inventory[index]
+			stands[stand.ID] = true
+			if stand.BlockID != nil {
+				blocks[*stand.BlockID] = true
+			}
+			if slot.ID == previewSlot && stand.ID == standID {
+				target.stand = stand
+			}
+		}
+	}
+	fields := make(fieldErrors)
+	if standID != "" && target.stand == nil {
+		fields["stand_id"] = "Stand tidak aktif pada slot acara ini."
+	}
+	for _, price := range rules.StandPrices {
+		if !stands[price.StandID] {
+			fields["stand_prices"] = "Gunakan stand aktif yang terdaftar pada acara ini."
+			break
+		}
+	}
+	for _, price := range rules.BlockPrices {
+		if !blocks[price.BlockID] {
+			fields["block_prices"] = "Gunakan blok yang memiliki stand aktif pada acara ini."
+			break
+		}
+	}
+	if len(fields) > 0 {
+		return target, fields
+	}
+	return target, nil
 }

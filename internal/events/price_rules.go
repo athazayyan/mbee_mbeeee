@@ -18,6 +18,21 @@ type slotPrice struct {
 	BasePrice   *int64 `json:"base_price"`
 }
 
+type standPrice struct {
+	StandID   string `json:"stand_id"`
+	BasePrice *int64 `json:"base_price"`
+}
+
+type blockPrice struct {
+	BlockID   string `json:"block_id"`
+	BasePrice *int64 `json:"base_price"`
+}
+
+type priceTarget struct {
+	slotID string
+	stand  *HoldStand
+}
+
 type occupancyTier struct {
 	OccupancyBPS  *int32 `json:"occupancy_bps"`
 	MultiplierBPS int32  `json:"multiplier_bps"`
@@ -32,6 +47,8 @@ type categoryQuota struct {
 type priceRules struct {
 	DefaultBasePrice *int64          `json:"default_base_price,omitempty"`
 	SlotPrices       []slotPrice     `json:"slot_prices,omitempty"`
+	StandPrices      []standPrice    `json:"stand_prices,omitempty"`
+	BlockPrices      []blockPrice    `json:"block_prices,omitempty"`
 	OccupancyTiers   []occupancyTier `json:"occupancy_tiers,omitempty"`
 	Floor            *int64          `json:"floor,omitempty"`
 	Cap              *int64          `json:"cap,omitempty"`
@@ -71,6 +88,26 @@ func (rules *priceRules) validate() fieldErrors {
 			highestBase = max(highestBase, *price.BasePrice)
 		}
 		slots[price.EventSlotID] = true
+	}
+	validateOverride := func(field, id string, base *int64, seen map[string]bool) {
+		if !httpapi.ValidID(id) || base == nil || !validAmount(*base) || seen[id] {
+			fields[field] = "Gunakan ID yang unik dan nominal rupiah yang valid."
+			return
+		}
+		seen[id] = true
+		highestBase = max(highestBase, *base)
+	}
+	stands := make(map[string]bool, len(rules.StandPrices))
+	for index := range rules.StandPrices {
+		price := &rules.StandPrices[index]
+		price.StandID = strings.ToLower(price.StandID)
+		validateOverride("stand_prices", price.StandID, price.BasePrice, stands)
+	}
+	blocks := make(map[string]bool, len(rules.BlockPrices))
+	for index := range rules.BlockPrices {
+		price := &rules.BlockPrices[index]
+		price.BlockID = strings.ToLower(price.BlockID)
+		validateOverride("block_prices", price.BlockID, price.BasePrice, blocks)
 	}
 	quotas := make(map[string]bool)
 	for index := range rules.CategoryQuotas {
@@ -116,8 +153,26 @@ func (rules priceRules) baseForSlot(slotID string) *int64 {
 	return rules.DefaultBasePrice
 }
 
-func (rules priceRules) quote(slotID string, confirmed, capacity int32) (priceQuote, error) {
-	base := rules.baseForSlot(slotID)
+func (rules priceRules) baseForTarget(target priceTarget) *int64 {
+	if target.stand != nil {
+		for _, price := range rules.StandPrices {
+			if price.StandID == target.stand.ID {
+				return price.BasePrice
+			}
+		}
+		if target.stand.BlockID != nil {
+			for _, price := range rules.BlockPrices {
+				if price.BlockID == *target.stand.BlockID {
+					return price.BasePrice
+				}
+			}
+		}
+	}
+	return rules.baseForSlot(target.slotID)
+}
+
+func (rules priceRules) quote(target priceTarget, confirmed, capacity int32) (priceQuote, error) {
+	base := rules.baseForTarget(target)
 	if base == nil {
 		return priceQuote{}, fieldErrors{"event_slot_id": "Slot ini belum memiliki harga."}
 	}

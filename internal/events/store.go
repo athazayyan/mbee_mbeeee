@@ -15,7 +15,8 @@ const eventColumns = `e.id, e.organization_id, e.name, e.slug, e.status, e.start
 var errDraftRequired = errors.New("event must be a draft")
 
 type Store struct {
-	DB *pgxpool.Pool
+	DB               *pgxpool.Pool
+	PricingInventory HoldInventory
 }
 
 type event struct {

@@ -1196,7 +1196,7 @@ paths:
       tags: [Denah dan harga]
       operationId: replacePricing
       summary: Tetapkan versi aturan harga draft
-      description: Saat ini mendukung harga dasar acara dan slot, tier, batas harga, serta kuota kategori tingkat acara. Harga per stand/blok dan pemakaian kuota saat booking mengikuti integrasi E05/E06. Setiap penyimpanan membuat revisi, dengan waktu server sebagai default effective_at.
+      description: Setiap penyimpanan membuat revisi. Harga dasar menggunakan urutan stand, blok, slot, lalu acara. Harga stand dan blok memerlukan sumber denah aktif. Waktu server dipakai sebagai effective_at jika tidak diisi.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -4128,13 +4128,13 @@ components:
       required: [stand_id, base_price]
       properties:
         stand_id: {type: string, format: uuid}
-        base_price: {$ref: '#/components/schemas/Rupiah'}
+        base_price: {$ref: '#/components/schemas/PricingRupiah'}
     BlockPrice:
       type: object
       required: [block_id, base_price]
       properties:
         block_id: {type: string, format: uuid}
-        base_price: {$ref: '#/components/schemas/Rupiah'}
+        base_price: {$ref: '#/components/schemas/PricingRupiah'}
     OccupancyTier:
       type: object
       required: [occupancy_bps, multiplier_bps]
@@ -4164,6 +4164,8 @@ components:
       properties:
         default_base_price: {$ref: '#/components/schemas/PricingRupiah'}
         slot_prices: {type: array, items: {$ref: '#/components/schemas/SlotPrice'}}
+        stand_prices: {type: array, items: {$ref: '#/components/schemas/StandPrice'}}
+        block_prices: {type: array, items: {$ref: '#/components/schemas/BlockPrice'}}
         occupancy_tiers: {type: array, items: {$ref: '#/components/schemas/OccupancyTier'}}
         floor: {$ref: '#/components/schemas/PricingRupiah'}
         cap: {$ref: '#/components/schemas/PricingRupiah'}
@@ -4174,8 +4176,6 @@ components:
       - type: object
         properties:
           effective_at: {type: string, format: date-time}
-          stand_prices: {type: array, maxItems: 0, items: {$ref: '#/components/schemas/StandPrice'}}
-          block_prices: {type: array, maxItems: 0, items: {$ref: '#/components/schemas/BlockPrice'}}
     PricingVersion:
       type: object
       required: [event_id, price_version, effective_at, rules]
@@ -4211,6 +4211,10 @@ components:
       properties:
         rules: {$ref: '#/components/schemas/PricingInput'}
         event_slot_id: {type: string, format: uuid}
+        stand_id:
+          type: string
+          format: uuid
+          description: Stand aktif pada slot yang dipilih untuk simulasi harga stand atau blok.
         confirmed_count: {type: integer, format: int32, minimum: 0, maximum: 2147483647}
         capacity: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
     PricingQuote:

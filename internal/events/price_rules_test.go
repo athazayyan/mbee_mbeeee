@@ -13,7 +13,7 @@ func TestQuoteUsesSlotAndHighestEligibleTier(t *testing.T) {
 			{OccupancyBPS: &earlier, MultiplierBPS: 11000},
 		},
 	}
-	quote, err := rules.quote("slot", 3, 6)
+	quote, err := rules.quote(priceTarget{slotID: "slot"}, 3, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,18 +32,46 @@ func TestQuoteAppliesBoundsBeforeCheckingRupiahRange(t *testing.T) {
 		Floor:            &floor,
 		Cap:              &cap,
 	}
-	quote, err := rules.quote("", 0, 5)
+	quote, err := rules.quote(priceTarget{}, 0, 5)
 	if err != nil || quote.Rent != cap {
 		t.Fatalf("quote = %+v, error = %v; want cap %d", quote, err, cap)
 	}
 	rules.Cap = nil
-	if _, err := rules.quote("", 0, 5); err == nil {
+	if _, err := rules.quote(priceTarget{}, 0, 5); err == nil {
 		t.Fatal("expected an error for rent beyond the supported range")
 	}
 	zeroPrice := int64(0)
 	rules.DefaultBasePrice = &zeroPrice
-	quote, err = rules.quote("", 0, 5)
+	quote, err = rules.quote(priceTarget{}, 0, 5)
 	if err != nil || quote.Rent != floor {
 		t.Fatalf("quote = %+v, error = %v; want floor %d", quote, err, floor)
+	}
+}
+
+func TestQuoteUsesStandThenBlockThenSlotThenEvent(t *testing.T) {
+	eventPrice, slotAmount, blockAmount, free := int64(100), int64(80), int64(50), int64(0)
+	blockID := "block"
+	rules := priceRules{
+		DefaultBasePrice: &eventPrice,
+		SlotPrices:       []slotPrice{{EventSlotID: "slot", BasePrice: &slotAmount}},
+		BlockPrices:      []blockPrice{{BlockID: blockID, BasePrice: &blockAmount}},
+		StandPrices:      []standPrice{{StandID: "free-stand", BasePrice: &free}},
+	}
+	for _, tc := range []struct {
+		name   string
+		target priceTarget
+		want   int64
+	}{
+		{"free stand overrides block", priceTarget{slotID: "slot", stand: &HoldStand{ID: "free-stand", BlockID: &blockID}}, 0},
+		{"block overrides slot", priceTarget{slotID: "slot", stand: &HoldStand{ID: "other-stand", BlockID: &blockID}}, 50},
+		{"slot overrides event", priceTarget{slotID: "slot", stand: &HoldStand{ID: "stand-without-block"}}, 80},
+		{"event fallback", priceTarget{slotID: "other-slot"}, 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quote, err := rules.quote(tc.target, 0, 1)
+			if err != nil || quote.Rent != tc.want {
+				t.Fatalf("quote %+v, err %v; want %d", quote, err, tc.want)
+			}
+		})
 	}
 }
