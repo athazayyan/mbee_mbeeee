@@ -4750,6 +4750,10 @@ components:
           stand_id: {type: string, format: uuid}
           event_slot_id: {type: string, format: uuid}
           event_name: {type: string, minLength: 1}
+          event_status:
+            type: string
+            enum: [draft, published, live, completed, cancelled]
+            description: Status acara. Status booking dilaporkan terpisah.
           created_at: {type: string, format: date-time}
           accepted_policy_version: {type: string, minLength: 1}
     BookingListItem:

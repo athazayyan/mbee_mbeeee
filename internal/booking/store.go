@@ -28,6 +28,7 @@ type Booking struct {
 	BusinessID    string    `json:"business_id"`
 	EventID       string    `json:"event_id"`
 	EventName     string    `json:"event_name"`
+	EventStatus   string    `json:"event_status"`
 	StandID       string    `json:"stand_id"`
 	SlotID        string    `json:"event_slot_id"`
 	Status        string    `json:"status"`
@@ -43,7 +44,7 @@ type bookingListItem struct {
 	NeedsRevisionResponse bool `json:"needs_revision_response"`
 }
 
-const bookingColumns = `b.id, b.business_id, b.event_id, e.name, a.stand_id, a.event_slot_id,
+const bookingColumns = `b.id, b.business_id, b.event_id, e.name, e.status, a.stand_id, a.event_slot_id,
 	CASE WHEN b.status IN ('held', 'payment_pending') AND b.expires_at <= statement_timestamp()
 		THEN 'expired' ELSE b.status END,
 	b.expires_at, b.created_at, b.refund_policy_version, b.rent, b.platform_fee, b.provider_fee,
@@ -113,7 +114,7 @@ func (s Store) list(ctx context.Context, actor, businessID string, before time.T
 func scanBooking(row pgx.Row, extra ...any) (Booking, error) {
 	var result Booking
 	result.Price.Currency = "IDR"
-	fields := []any{&result.ID, &result.BusinessID, &result.EventID, &result.EventName, &result.StandID, &result.SlotID, &result.Status,
+	fields := []any{&result.ID, &result.BusinessID, &result.EventID, &result.EventName, &result.EventStatus, &result.StandID, &result.SlotID, &result.Status,
 		&result.ExpiresAt, &result.CreatedAt, &result.PolicyVersion, &result.Price.Rent, &result.Price.PlatformFee,
 		&result.Price.ProviderFee, &result.Price.Total, &result.Price.Version, &result.ServerNow}
 	err := row.Scan(append(fields, extra...)...)
