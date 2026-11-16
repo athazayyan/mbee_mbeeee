@@ -2077,9 +2077,9 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
-      summary: '[Rencana] Buat payment attempt booking'
-      description: Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
-      x-implementation-status: planned
+      summary: 'Buat payment attempt booking (Midtrans Snap)'
+      description: Sandbox. Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -2094,6 +2094,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/PaymentInput'}
       responses:
+        '200':
+          description: Attempt yang sudah tersimpan untuk pengiriman ulang atau booking aktif
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentAttempt'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
         '201':
           description: Berhasil
           content:
@@ -2144,10 +2154,9 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: acceptPaymentWebhook
-      summary: '[Rencana] Terima webhook pembayaran'
-      description: Validasi signature atas payload asli. Dedupe event provider dan akui setelah penyimpanan durable. Format final
-        mengikuti provider.
-      x-implementation-status: planned
+      summary: 'Terima webhook pembayaran'
+      description: Verifikasi signature, lalu ambil status transaksi dari Midtrans. Dedupe dan akui setelah status terverifikasi tersimpan.
+      x-implementation-status: implemented
       security:
       - ProviderSignature: []
       parameters:

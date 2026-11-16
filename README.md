@@ -87,6 +87,10 @@ Pada deployment, ganti `go run .` dengan `./tenantku`. File JSON berisi `version
 
 Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas per akun yang disetujui. Hold berlaku 15 menit atau sampai slot berakhir, mana yang lebih dulu. API membaca versi terbaru yang sudah berlaku dan mengembalikan 503 bila belum ada. Untuk menonaktifkan quote dan hold, kosongkan batas dan jalankan skrip role dengan nilai bawaan `false`.
 
+## Pembayaran sandbox
+
+Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
+
 ## Verifikasi lokal
 
 | Endpoint | Hasil yang diharapkan |

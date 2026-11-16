@@ -6,6 +6,10 @@
 \else
 \set booking_hold false
 \endif
+\if :{?payment_sandbox}
+\else
+\set payment_sandbox false
+\endif
 BEGIN;
 
 SELECT current_database() AS database_name,
@@ -17,7 +21,8 @@ SELECT current_database() AS database_name,
            AND r.rolname <> current_user
            AND NOT pg_has_role(r.oid, (SELECT datdba FROM pg_database WHERE datname = current_database()), 'MEMBER'))
        ) AS valid_runtime_roles,
-       :'booking_hold'::boolean AS runtime_booking_hold
+       :'booking_hold'::boolean AS runtime_booking_hold,
+       :'payment_sandbox'::boolean AS runtime_payment_sandbox
 \gset
 \if :valid_runtime_roles
 \else
@@ -43,6 +48,15 @@ REVOKE SELECT (block_id, status), UPDATE (status),
     ON public.allocations FROM :"api_role";
 REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history FROM :"api_role";
+REVOKE SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts FROM :"api_role";
+REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events FROM :"api_role";
+REVOKE SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"api_role";
+REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"api_role";
+REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries FROM :"api_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
@@ -108,6 +122,21 @@ GRANT SELECT (block_id, status), UPDATE (status),
     ON public.allocations TO :"api_role";
 GRANT INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history TO :"api_role";
+\endif
+
+\if :runtime_payment_sandbox
+GRANT SELECT (created_by), UPDATE (status) ON public.bookings TO :"api_role";
+GRANT UPDATE (status) ON public.allocations TO :"api_role";
+GRANT INSERT (booking_id, from_status, to_status, reason) ON public.booking_status_history TO :"api_role";
+GRANT SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts TO :"api_role";
+GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events TO :"api_role";
+GRANT SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions TO :"api_role";
+GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"api_role";
+GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries TO :"api_role";
 \endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";
