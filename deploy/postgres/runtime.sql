@@ -48,6 +48,12 @@ REVOKE SELECT (block_id, status), UPDATE (status),
     ON public.allocations FROM :"api_role";
 REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history FROM :"api_role";
+-- Event revision proposals are paused. Existing revisions remain readable for booking snapshots.
+REVOKE INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
+    ON public.event_revisions FROM :"api_role";
+REVOKE INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings FROM :"api_role";
+REVOKE INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions FROM :"api_role";
+REVOKE INSERT (revision_id, event_id, applied_by, supersedes_through) ON public.event_revision_applications FROM :"api_role";
 REVOKE SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
     INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
     UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts FROM :"api_role";
@@ -101,11 +107,6 @@ GRANT INSERT (organization_id, created_by, name, slug, starts_at, ends_at, timez
 GRANT INSERT (event_id, code, starts_at, ends_at), UPDATE (starts_at, ends_at) ON public.event_slots TO :"api_role";
 GRANT INSERT (event_id, actor_id, from_status, to_status, reason) ON public.event_status_history TO :"api_role";
 GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.event_pricing_versions TO :"api_role";
-GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
-    ON public.event_revisions TO :"api_role";
-GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
-GRANT INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions TO :"api_role";
-GRANT INSERT (revision_id, event_id, applied_by, supersedes_through) ON public.event_revision_applications TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
