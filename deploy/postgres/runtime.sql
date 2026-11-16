@@ -113,7 +113,14 @@ GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"a
 GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
 GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
     UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at) ON public.products TO :"api_role";
-GRANT INSERT (business_id, product_id, delta, reason, note, actor_id, sale_ref) ON public.inventory_movements TO :"api_role";
+GRANT INSERT (business_id, product_id, delta, reason, note, actor_id, sale_ref, adjustment_ref) ON public.inventory_movements TO :"api_role";
+-- Koreksi penjualan dan pengeluaran (E10-05): append-only, tanpa UPDATE atau DELETE untuk role API.
+GRANT SELECT ON public.sale_adjustments, public.sale_adjustment_items, public.expenses TO :"api_role";
+GRANT INSERT (business_id, sale_ref, type, reason, amount, created_by, idempotency_key, request_digest)
+    ON public.sale_adjustments TO :"api_role";
+GRANT INSERT (adjustment_id, sale_item_id, quantity) ON public.sale_adjustment_items TO :"api_role";
+GRANT INSERT (business_id, event_id, category, amount, occurred_at, note, created_by, idempotency_key, request_digest)
+    ON public.expenses TO :"api_role";
 -- Kasir (E10): sesi per perangkat dan penjualan hasil sync; riwayat penjualan tidak pernah diubah langsung.
 GRANT SELECT ON public.pos_sessions, public.sales, public.sale_items TO :"api_role";
 GRANT INSERT (business_id, device_id, event_id, opened_by), UPDATE (closed_at) ON public.pos_sessions TO :"api_role";
