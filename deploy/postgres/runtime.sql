@@ -121,6 +121,10 @@ GRANT INSERT (business_id, sale_id, device_id, session_id, event_id, client_crea
     request_digest, currency, method, discount, total, synced_by) ON public.sales TO :"api_role";
 GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantity, unit_price, unit_cost, discount, subtotal)
     ON public.sale_items TO :"api_role";
+-- Admin platform (E16): keanggotaan admin hanya dibaca API; pemberian lewat perintah grant-admin.
+GRANT SELECT ON public.platform_admins, public.admin_audit, public.event_plan_versions, public.event_plans TO :"api_role";
+GRANT INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id) ON public.admin_audit TO :"api_role";
+GRANT UPDATE (verification_status, verified_at) ON public.organizations TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";
