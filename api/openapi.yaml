@@ -898,6 +898,60 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/revisions:
+    parameters:
+    - {$ref: '#/components/parameters/IdentityResourceID'}
+    get:
+      tags: [Acara dan katalog]
+      operationId: listEventRevisions
+      summary: Baca histori usulan revisi acara
+      description: Hanya pemilik organisasi. Mengembalikan snapshot sebelum dan sesudah serta jumlah booking aktif pada saat usulan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Histori usulan revisi secara terurut
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/EventRevision'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Acara dan katalog]
+      operationId: proposeEventRevision
+      summary: Ajukan perubahan material acara dengan booking aktif
+      description: Pemilik mencatat usulan untuk jadwal, zona waktu, lokasi, atau syarat pada acara terbit atau berlangsung. Usulan menyimpan hubungan dengan booking terdampak. Perubahan acara, persetujuan tenant, pemberitahuan, dan refund memiliki alur terpisah.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/EventRevisionInput'}
+      responses:
+        '200': {$ref: '#/components/responses/EventRevision'}
+        '201': {$ref: '#/components/responses/EventRevision'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/cancel:
     post:
       tags: [Acara dan katalog]
@@ -3610,6 +3664,16 @@ components:
           schema:
             $ref: '#/components/schemas/Credentials'
   responses:
+    EventRevision:
+      description: Usulan revisi baru atau hasil pengulangan idempoten
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: {$ref: '#/components/schemas/EventRevision'}
+              meta: {$ref: '#/components/schemas/EmptyMeta'}
     AccountProfile:
       description: Akun aktif dan keanggotaan yang tersedia
       content:
@@ -3872,6 +3936,46 @@ components:
         description: {type: string, maxLength: 3000}
         facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         terms: {type: string, maxLength: 6000}
+    EventRevisionInput:
+      type: object
+      additionalProperties: false
+      required: [reason, changes]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 2000}
+        changes:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            starts_at: {type: string, format: date-time}
+            ends_at: {type: string, format: date-time}
+            timezone: {type: string, minLength: 1, maxLength: 64}
+            city: {type: string, minLength: 1, maxLength: 120}
+            address: {type: string, minLength: 1, maxLength: 300}
+            terms: {type: string, minLength: 1, maxLength: 6000}
+    EventMaterialSnapshot:
+      type: object
+      required: [starts_at, ends_at, timezone, city, address, terms]
+      properties:
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        timezone: {type: string}
+        city: {type: string}
+        address: {type: string}
+        terms: {type: string}
+    EventRevision:
+      type: object
+      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        requested_by: {type: string, format: uuid}
+        reason: {type: string}
+        before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
+        after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
+        affected_bookings: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
     StandLayout:
       type: object
       required: [stand_id, code, x, y, width, height, rotation]

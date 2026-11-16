@@ -29,7 +29,7 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
-    public.event_pricing_versions TO :"api_role";
+    public.event_pricing_versions, public.event_revisions, public.event_revision_bookings TO :"api_role";
 GRANT SELECT (id, email, password_hash) ON public.users TO :"api_role";
 GRANT SELECT (id, user_id, expires_at, revoked_at) ON public.sessions TO :"api_role";
 GRANT SELECT (token_hash, session_id, used_at) ON public.session_refresh_tokens TO :"api_role";
@@ -53,6 +53,9 @@ GRANT INSERT (organization_id, created_by, name, slug, starts_at, ends_at, timez
 GRANT INSERT (event_id, code, starts_at, ends_at), UPDATE (starts_at, ends_at) ON public.event_slots TO :"api_role";
 GRANT INSERT (event_id, actor_id, from_status, to_status, reason) ON public.event_status_history TO :"api_role";
 GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.event_pricing_versions TO :"api_role";
+GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
+    ON public.event_revisions TO :"api_role";
+GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";
 GRANT SELECT (booking_id, status), UPDATE (status) ON public.allocations TO :"worker_role";

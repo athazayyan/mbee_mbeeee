@@ -35,7 +35,8 @@ type event struct {
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM events, event_slots, event_status_history, event_pricing_versions LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT 1 FROM events, event_slots, event_status_history, event_pricing_versions,
+		event_revisions, event_revision_bookings LIMIT 0`)
 	return err
 }
 
@@ -118,10 +119,19 @@ func (s Store) update(ctx context.Context, actor, id string, input eventInput) (
 		if err != nil {
 			return err
 		}
+		value := input.apply(previous)
+		if revisionRequired(previous, value) {
+			active, err := hasAffectedBookings(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if active {
+				return errRevisionRequired
+			}
+		}
 		if previous.Status != "draft" {
 			return errDraftRequired
 		}
-		value := input.apply(previous)
 		if !value.EndsAt.After(value.StartsAt) {
 			return fieldErrors{"ends_at": "Waktu selesai harus sesudah waktu mulai."}
 		}
