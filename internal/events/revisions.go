@@ -24,9 +24,9 @@ var (
 	errIdempotencyKeyMismatch = errors.New("idempotency key was already used for a different request")
 )
 
-const affectedBookings = `FROM bookings b WHERE b.event_id = $1 AND (
-	b.status = 'confirmed' OR (b.status IN ('held', 'payment_pending') AND b.expires_at > statement_timestamp())
-)`
+const activeBooking = `b.status = 'confirmed' OR (b.status IN ('held', 'payment_pending') AND b.expires_at > statement_timestamp())`
+
+const affectedBookings = `FROM bookings b WHERE b.event_id = $1 AND (` + activeBooking + `)`
 
 type materialInput struct {
 	StartsAt *time.Time `json:"starts_at"`
@@ -82,13 +82,26 @@ type eventRevision struct {
 	Before           materialSnapshot `json:"before"`
 	After            materialSnapshot `json:"after"`
 	AffectedBookings int64            `json:"affected_bookings"`
+	ApprovedBookings int64            `json:"approved_bookings"`
+	DeclinedBookings int64            `json:"declined_bookings"`
 	CreatedAt        time.Time        `json:"created_at"`
+	Status           string           `json:"status"`
+	CanApply         bool             `json:"can_apply"`
+	AppliedAt        *time.Time       `json:"applied_at"`
 }
 
 const selectRevision = `SELECT r.id, r.event_id, r.revision, r.requested_by, r.reason,
-	r.snapshot_before, r.snapshot_after, (
-		SELECT count(*) FROM event_revision_bookings b WHERE b.revision_id = r.id
-	), r.created_at FROM event_revisions r`
+	r.snapshot_before, r.snapshot_after, counts.affected, counts.approved, counts.declined, r.created_at,
+	` + revisionStatusSQL + `, NOT (` + revisionClosed + `) AND NOT (` + unapprovedActiveBookings + `), app.applied_at
+	FROM event_revisions r
+	LEFT JOIN event_revision_applications app ON app.revision_id = r.id
+	CROSS JOIN LATERAL (
+		SELECT count(*) AS affected, count(*) FILTER (WHERE d.decision = 'approved') AS approved,
+			count(*) FILTER (WHERE d.decision = 'declined') AS declined
+		FROM event_revision_bookings b
+		LEFT JOIN event_revision_decisions d ON d.revision_id = b.revision_id AND d.booking_id = b.booking_id
+		WHERE b.revision_id = r.id
+	) counts`
 
 func (s Store) proposeRevision(c *gin.Context, account auth.Account) {
 	id := c.Param("id")
@@ -252,6 +265,7 @@ func (s Store) revisions(ctx context.Context, actor, id string, before time.Time
 func scanRevision(row pgx.Row) (eventRevision, error) {
 	var r eventRevision
 	err := row.Scan(&r.ID, &r.EventID, &r.Revision, &r.RequestedBy, &r.Reason,
-		&r.Before, &r.After, &r.AffectedBookings, &r.CreatedAt)
+		&r.Before, &r.After, &r.AffectedBookings, &r.ApprovedBookings, &r.DeclinedBookings, &r.CreatedAt,
+		&r.Status, &r.CanApply, &r.AppliedAt)
 	return r, err
 }

@@ -6,6 +6,10 @@
 \else
 \set booking_hold false
 \endif
+\if :{?payment_sandbox}
+\else
+\set payment_sandbox false
+\endif
 BEGIN;
 
 SELECT current_database() AS database_name,
@@ -17,7 +21,8 @@ SELECT current_database() AS database_name,
            AND r.rolname <> current_user
            AND NOT pg_has_role(r.oid, (SELECT datdba FROM pg_database WHERE datname = current_database()), 'MEMBER'))
        ) AS valid_runtime_roles,
-       :'booking_hold'::boolean AS runtime_booking_hold
+       :'booking_hold'::boolean AS runtime_booking_hold,
+       :'payment_sandbox'::boolean AS runtime_payment_sandbox
 \gset
 \if :valid_runtime_roles
 \else
@@ -43,11 +48,20 @@ REVOKE SELECT (block_id, status), UPDATE (status),
     ON public.allocations FROM :"api_role";
 REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history FROM :"api_role";
+REVOKE SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts FROM :"api_role";
+REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events FROM :"api_role";
+REVOKE SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"api_role";
+REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"api_role";
+REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries FROM :"api_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
     public.event_pricing_versions, public.event_revisions, public.event_revision_bookings,
-    public.organization_event_history TO :"api_role";
+    public.event_revision_decisions, public.event_revision_applications, public.organization_event_history TO :"api_role";
 GRANT SELECT (id, email, password_hash, email_verified_at),
     UPDATE (password_hash, email_verified_at) ON public.users TO :"api_role";
 GRANT SELECT (token_hash, user_id, purpose, expires_at, used_at, created_at),
@@ -58,6 +72,18 @@ GRANT SELECT (token_hash, session_id, used_at) ON public.session_refresh_tokens 
 GRANT SELECT (id, business_id, event_id, status, expires_at, created_at, refund_policy_version,
     price_revision, rent, platform_fee, provider_fee, total) ON public.bookings TO :"api_role";
 GRANT SELECT (booking_id, stand_id, event_slot_id) ON public.allocations TO :"api_role";
+GRANT SELECT (event_id, status) ON public.allocations TO :"api_role";
+GRANT SELECT ON public.event_layouts, public.layout_blocks, public.layout_areas, public.stands,
+    public.event_layout_revisions TO :"api_role";
+GRANT INSERT (event_id, revision, width, height, cell_meters, updated_by),
+    UPDATE (revision, width, height, cell_meters, updated_by, updated_at) ON public.event_layouts TO :"api_role";
+GRANT INSERT (id, event_id, label, x, y, width, height),
+    UPDATE (label, x, y, width, height), DELETE ON public.layout_blocks TO :"api_role";
+GRANT INSERT (event_id, kind, x, y, width, height), DELETE ON public.layout_areas TO :"api_role";
+GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active),
+    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
+    ON public.stands TO :"api_role";
+GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
 GRANT SELECT (id) ON public.booking_status_history TO :"api_role";
 GRANT INSERT (email, password_hash) ON public.users TO :"api_role";
 GRANT INSERT (user_id, expires_at), UPDATE (revoked_at) ON public.sessions TO :"api_role";
@@ -78,22 +104,11 @@ GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.eve
 GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
     ON public.event_revisions TO :"api_role";
 GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
+GRANT INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions TO :"api_role";
+GRANT INSERT (revision_id, event_id, applied_by, supersedes_through) ON public.event_revision_applications TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
--- Denah (E05): revisi penuh menulis ulang blok dan area, sedangkan stand hanya ditandai removed_at.
-GRANT SELECT ON public.event_layouts, public.layout_blocks, public.layout_areas, public.stands,
-    public.event_layout_revisions TO :"api_role";
--- Status alokasi dipakai untuk melindungi stand terpesan dan menghitung status stand di denah publik.
-GRANT SELECT (event_id, status) ON public.allocations TO :"api_role";
-GRANT INSERT (event_id, revision, width, height, cell_meters, updated_by),
-    UPDATE (revision, width, height, cell_meters, updated_by, updated_at) ON public.event_layouts TO :"api_role";
-GRANT INSERT (id, event_id, label, x, y, width, height), UPDATE (label, x, y, width, height), DELETE
-    ON public.layout_blocks TO :"api_role";
-GRANT INSERT (event_id, kind, x, y, width, height), DELETE ON public.layout_areas TO :"api_role";
-GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active),
-    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
-    ON public.stands TO :"api_role";
-GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
+GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
 -- Produk dan stok usaha (E10): stok hanya berubah bersama baris inventory_movements.
 GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
 GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
@@ -108,6 +123,7 @@ GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantit
     ON public.sale_items TO :"api_role";
 
 \if :runtime_booking_hold
+GRANT SELECT ON public.hold_policy_versions TO :"api_role";
 GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
     INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
         rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
@@ -118,6 +134,21 @@ GRANT SELECT (block_id, status), UPDATE (status),
     ON public.allocations TO :"api_role";
 GRANT INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history TO :"api_role";
+\endif
+
+\if :runtime_payment_sandbox
+GRANT SELECT (created_by), UPDATE (status) ON public.bookings TO :"api_role";
+GRANT UPDATE (status) ON public.allocations TO :"api_role";
+GRANT INSERT (booking_id, from_status, to_status, reason) ON public.booking_status_history TO :"api_role";
+GRANT SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts TO :"api_role";
+GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events TO :"api_role";
+GRANT SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions TO :"api_role";
+GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"api_role";
+GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries TO :"api_role";
 \endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";

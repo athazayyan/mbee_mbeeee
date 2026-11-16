@@ -83,7 +83,7 @@ func scanPublicEvent(row pgx.Row) (publicEvent, error) {
 // listPublic returns up to filter.Limit events after the cursor, ordered by start time.
 func (s Store) listPublic(ctx context.Context, filter catalogFilter) ([]publicEvent, error) {
 	var result []publicEvent
-	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+publicEventColumns+` FROM events e
 			JOIN organizations o ON o.id = e.organization_id
 			WHERE e.status = ANY($1::text[])
@@ -121,7 +121,7 @@ func (s Store) listPublic(ctx context.Context, filter catalogFilter) ([]publicEv
 // getPublic returns any event except drafts, which stay hidden as not found.
 func (s Store) getPublic(ctx context.Context, id string) (publicEvent, error) {
 	var result publicEvent
-	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
 		result, err = scanPublicEvent(tx.QueryRow(ctx, `SELECT `+publicEventColumns+` FROM events e
 			JOIN organizations o ON o.id = e.organization_id
@@ -159,11 +159,19 @@ func addLayoutSummary(ctx context.Context, tx pgx.Tx, value *publicEvent) error 
 		}
 	}
 	value.Capacity = &capacity
-	taken, err := takenStands(ctx, tx, value.ID)
+	var at time.Time
+	if err := tx.QueryRow(ctx, "SELECT transaction_timestamp()").Scan(&at); err != nil {
+		return err
+	}
+	slotID, _, err := publicLayoutSlot(ctx, tx, value.ID, at)
 	if err != nil {
 		return err
 	}
-	prices, err := standPrices(ctx, tx, value.ID, layout, taken)
+	taken, err := takenStands(ctx, tx, value.ID, slotID, at)
+	if err != nil {
+		return err
+	}
+	prices, err := standPrices(ctx, tx, value.ID, slotID, at, layout, taken)
 	if err != nil {
 		return err
 	}
@@ -181,23 +189,24 @@ func addLayoutSummary(ctx context.Context, tx pgx.Tx, value *publicEvent) error 
 	return nil
 }
 
-// takenStands maps stand IDs with an active hold, offer, or reservation to the strongest allocation status.
-func takenStands(ctx context.Context, tx pgx.Tx, eventID string) (map[string]string, error) {
-	taken := make(map[string]string)
-	rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status FROM allocations a
-		WHERE a.event_id = $1 AND a.status IN ('hold', 'offer', 'reserved')`, eventID)
+// takenStands returns allocated stands for this slot and identifies confirmed reservations.
+func takenStands(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time.Time) (map[string]bool, error) {
+	taken := make(map[string]bool)
+	rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status = 'reserved' AND b.status = 'confirmed' FROM allocations a
+		JOIN bookings b ON b.id = a.booking_id
+		WHERE a.event_id = $1 AND a.event_slot_id = $2 AND a.status IN ('hold', 'offer', 'reserved')
+		AND NOT (a.status IN ('hold', 'offer') AND b.status IN ('held', 'payment_pending') AND b.expires_at <= $3)`, eventID, slotID, at)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var stand, allocation string
-		if err := rows.Scan(&stand, &allocation); err != nil {
+		var stand string
+		var confirmed bool
+		if err := rows.Scan(&stand, &confirmed); err != nil {
 			return nil, err
 		}
-		if taken[stand] != "reserved" {
-			taken[stand] = allocation
-		}
+		taken[stand] = confirmed
 	}
 	return taken, rows.Err()
 }

@@ -99,6 +99,7 @@ func TestHoldHTTPContention(t *testing.T) {
 			'Asia/Jakarta', 'Banda Aceh', 'Street', 'Original terms') RETURNING id`, org, organizer)
 	slot := insertID(t, ctx, store, `INSERT INTO event_slots (event_id, code, starts_at, ends_at)
 		SELECT id, 'whole-event', starts_at, ends_at FROM events WHERE id = $1 RETURNING id`, event)
+	createTestStands(t, ctx, store, event, organizer)
 	execBookingSQL(t, ctx, store, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
 		VALUES ($1, 1, $2, '{"default_base_price":30000}', now())`, event, organizer)
 

@@ -75,7 +75,21 @@ Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `a
 
 Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
 
-Saat rilis mendaftarkan endpoint hold dengan sumber stand dan kebijakan yang aktif, tambahkan `-v booking_hold=true` pada perintah `psql` di atas. Parameter ini memberi role API izin menyimpan booking, alokasi, dan histori serta memproses expiry. Untuk rilis tanpa endpoint hold, jalankan kembali skrip dengan nilai bawaan `false` untuk mencabut grant tambahan tersebut.
+## Mengaktifkan quote dan hold
+
+Setelah migration, pasang kebijakan booking yang disetujui dengan role pemilik database.
+
+```bash
+DATABASE_URL="$MIGRATION_DATABASE_URL" go run . hold-policy /path/to/policy.json
+```
+
+Pada deployment, ganti `go run .` dengan `./tenantku`. File JSON berisi `version`, `effective_at` dalam format RFC 3339 dengan zona waktu, `platform_fee` dan `provider_fee` dalam rupiah bulat, `refund_terms` untuk tenant, serta objek `refund_policy` yang disimpan di snapshot booking. Isi kedua fee secara eksplisit, termasuk jika disepakati bernilai nol. Menjalankan perintah ulang dengan isi yang sama aman. Perubahan kebijakan memakai versi dan waktu efektif baru.
+
+Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas per akun yang disetujui. Untuk durasi, isi `BOOKING_HOLD_DURATION` dalam format seperti `15m`. Nilai bawaan 15 menit. Hold berakhir saat durasi habis atau slot berakhir, mana yang lebih dulu. Perubahan durasi berlaku untuk hold baru. API membaca versi kebijakan terbaru yang sudah berlaku dan mengembalikan 503 bila belum ada. Untuk menonaktifkan quote dan hold, kosongkan batas dan jalankan skrip role dengan nilai bawaan `false`.
+
+## Pembayaran sandbox
+
+Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
 
 ## Verifikasi lokal
 

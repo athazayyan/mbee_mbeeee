@@ -985,9 +985,9 @@ paths:
     get:
       tags: [Acara dan katalog]
       operationId: getPublicationReadiness
-      summary: '[Rencana] Periksa syarat publikasi draft'
+      summary: Periksa syarat publikasi draft
       description: Pemilik organisasi melihat kesiapan dan masalah publikasi yang ditemukan server. Endpoint publish memeriksa ulang syarat sebelum mengubah status.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1016,9 +1016,9 @@ paths:
     post:
       tags: [Acara dan katalog]
       operationId: publishEvent
-      summary: '[Rencana] Terbitkan acara'
+      summary: Terbitkan acara
       description: Pemilik organisasi menerbitkan draft dengan denah valid dan syarat acara. Harga efektif dan versi terjadwal harus mencakup setiap slot yang belum berakhir saat versi itu berlaku. Pengulangan untuk acara yang sudah terbit mengembalikan acara yang sama.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1155,7 +1155,7 @@ paths:
       operationId: listEventRevisions
       summary: Baca histori usulan revisi acara
       description: Hanya pemilik organisasi. Mengembalikan snapshot sebelum dan sesudah serta jumlah booking aktif pada saat usulan.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1181,7 +1181,7 @@ paths:
       operationId: proposeEventRevision
       summary: Ajukan perubahan material acara dengan booking aktif
       description: Pemilik mencatat usulan untuk jadwal, zona waktu, lokasi, atau syarat pada acara terbit atau berlangsung. Usulan menyimpan hubungan dengan booking terdampak. Perubahan acara, persetujuan tenant, pemberitahuan, dan refund memiliki alur terpisah.
-      x-implementation-status: implemented
+      x-implementation-status: planned
       security:
       - AccessCookie: []
       parameters:
@@ -1201,12 +1201,44 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/revisions/{revision_id}/apply:
+    post:
+      tags: [Acara dan katalog]
+      operationId: applyEventRevision
+      summary: Terapkan usulan revisi yang disetujui tenant
+      description: Pemilik organisasi menerapkan usulan yang masih sesuai dengan acara. Semua booking aktif harus memiliki persetujuan untuk usulan ini. Transaksi memperbarui acara dan slot, mencatat penerapan, serta menutup usulan lama. Pengiriman ulang mengembalikan kondisi acara saat ini.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      - name: revision_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Acara setelah penerapan revisi
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ManagedEvent'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/cancel:
     post:
       tags: [Acara dan katalog]
       operationId: cancelEvent
-      summary: Batalkan draft acara
-      description: Pemilik organisasi dapat membatalkan draft dengan alasan. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat. Pembatalan acara terbit dan refund direncanakan setelah integrasi booking.
+      summary: Batalkan acara
+      description: Pemilik organisasi dapat membatalkan draft atau acara terbit/berlangsung. Hold tanpa riwayat pembayaran dibatalkan dan stand dilepas dalam transaksi yang sama. Booking dengan pembayaran atau alokasi yang perlu penanganan mengembalikan 409 EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1399,8 +1431,8 @@ paths:
     put:
       tags: [Denah dan harga]
       operationId: replacePricing
-      summary: Tetapkan versi aturan harga draft
-      description: Setiap penyimpanan membuat revisi. Harga dasar menggunakan urutan stand, blok, slot, lalu acara. Harga stand dan blok memerlukan sumber denah aktif. Waktu server dipakai sebagai effective_at jika tidak diisi.
+      summary: Tetapkan versi aturan harga acara
+      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1712,7 +1744,7 @@ paths:
       tags: [Kurasi dan booking]
       operationId: listBookings
       summary: Daftar booking usaha
-      description: Hanya pemilik usaha. Urutan dari waktu pembuatan terbaru dengan pagination cursor.
+      description: Hanya pemilik usaha. Urutan dari waktu pembuatan terbaru dengan pagination cursor. Booking yang masih dapat menanggapi usulan revisi diberi penanda.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1721,6 +1753,10 @@ paths:
         in: query
         required: true
         schema: {type: string, format: uuid}
+      - name: needs_revision_response
+        in: query
+        schema: {type: boolean, default: false}
+        description: Jika true, tampilkan hanya booking dengan usulan revisi yang masih perlu dijawab.
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -1732,7 +1768,7 @@ paths:
                 type: object
                 required: [data, meta]
                 properties:
-                  data: {type: array, items: {$ref: '#/components/schemas/BookingDetail'}}
+                  data: {type: array, items: {$ref: '#/components/schemas/BookingListItem'}}
                   meta:
                     allOf:
                     - {$ref: '#/components/schemas/CursorMeta'}
@@ -1745,9 +1781,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: quoteHold
-      summary: '[Rencana] Tinjau biaya dan syarat hold'
-      description: Pemilik usaha memeriksa stand pada satu slot. Respons memuat harga, syarat acara dan ketentuan refund. Simulasi ini tidak mengalokasikan stand.
-      x-implementation-status: planned
+      summary: Tinjau biaya dan syarat hold
+      description: Pemilik usaha memeriksa stand pada satu slot. Respons memuat harga, syarat acara dan ketentuan refund tanpa mengalokasikan stand. Layanan membutuhkan BOOKING_MAX_ACTIVE_HOLDS dan kebijakan yang berlaku.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       requestBody:
@@ -1777,9 +1813,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: createHold
-      summary: '[Rencana] Buat hold stand'
+      summary: Buat hold stand
       description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan jika expected_price diisi, seluruh komponen harga diverifikasi ulang. Percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1900,6 +1936,81 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/event-revisions:
+    get:
+      tags: [Kurasi dan booking]
+      operationId: listBookingEventRevisions
+      summary: Baca usulan revisi yang berdampak pada booking
+      description: Hanya pemilik usaha pada booking. Mengembalikan usulan yang mencatat booking tersebut sebagai terdampak, dari yang terbaru. Snapshot menunjukkan usulan dan tidak mengubah booking.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Usulan revisi untuk booking
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BookingEventRevision'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/event-revisions/{revision_id}/decision:
+    put:
+      tags: [Kurasi dan booking]
+      operationId: decideBookingEventRevision
+      summary: Catat keputusan tenant atas usulan revisi acara
+      description: Pemilik usaha dapat mencatat satu keputusan untuk booking aktif yang terdampak. Mengulang pilihan yang sama mengembalikan keputusan semula. Aksi ini hanya mencatat keputusan tenant.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: revision_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+      responses:
+        '200':
+          description: Keputusan yang tersimpan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/EventRevisionDecision'}
+                  meta: {type: object}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/cancel:
     post:
       tags: [Kurasi dan booking]
@@ -1966,9 +2077,9 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
-      summary: '[Rencana] Buat payment attempt booking'
-      description: Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
-      x-implementation-status: planned
+      summary: 'Buat payment attempt booking (Midtrans Snap)'
+      description: Sandbox. Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1983,6 +2094,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/PaymentInput'}
       responses:
+        '200':
+          description: Attempt yang sudah tersimpan untuk pengiriman ulang atau booking aktif
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentAttempt'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
         '201':
           description: Berhasil
           content:
@@ -2033,10 +2154,9 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: acceptPaymentWebhook
-      summary: '[Rencana] Terima webhook pembayaran'
-      description: Validasi signature atas payload asli. Dedupe event provider dan akui setelah penyimpanan durable. Format final
-        mengikuti provider.
-      x-implementation-status: planned
+      summary: 'Terima webhook pembayaran'
+      description: Verifikasi signature, lalu ambil status transaksi dari Midtrans. Dedupe dan akui setelah status terverifikasi tersimpan.
+      x-implementation-status: implemented
       security:
       - ProviderSignature: []
       parameters:
@@ -4383,7 +4503,7 @@ components:
         terms: {type: string}
     EventRevision:
       type: object
-      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, created_at]
+      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, approved_bookings, declined_bookings, created_at, status, can_apply, applied_at]
       properties:
         id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
@@ -4393,7 +4513,40 @@ components:
         before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         affected_bookings: {type: integer, minimum: 1}
+        approved_bookings: {type: integer, minimum: 0}
+        declined_bookings: {type: integer, minimum: 0}
         created_at: {type: string, format: date-time}
+        status: {$ref: '#/components/schemas/EventRevisionStatus'}
+        can_apply: {type: boolean}
+        applied_at: {type: [string, 'null'], format: date-time}
+    BookingEventRevision:
+      type: object
+      required: [id, revision, before, after, created_at, decision, decided_at, can_decide, status]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
+        after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
+        created_at: {type: string, format: date-time}
+        decision:
+          anyOf:
+          - {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+          - {type: 'null'}
+        decided_at: {type: [string, 'null'], format: date-time}
+        can_decide: {type: boolean}
+        status: {$ref: '#/components/schemas/EventRevisionStatus'}
+    EventRevisionStatus:
+      type: string
+      enum: [proposed, applied, superseded]
+    EventRevisionDecisionChoice:
+      type: string
+      enum: [approved, declined]
+    EventRevisionDecision:
+      type: object
+      required: [decision, decided_at]
+      properties:
+        decision: {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+        decided_at: {type: string, format: date-time}
     StandLayout:
       type: object
       required: [stand_id, code, x, y, width, height, rotation]
@@ -4463,9 +4616,11 @@ components:
           base_price: {$ref: '#/components/schemas/Rupiah'}
     PublicLayout:
       type: object
-      required: [event_id, revision, width, height, cell_meters, blocks, stands, areas]
+      required: [event_id, event_name, event_slot_id, revision, width, height, cell_meters, blocks, stands, areas]
       properties:
         event_id: {type: string, format: uuid}
+        event_name: {type: string}
+        event_slot_id: {type: [string, 'null'], format: uuid, description: Slot yang dipakai untuk harga dan ketersediaan. Null jika semua slot berakhir.}
         revision: {type: integer, minimum: 1}
         width: {type: integer, minimum: 4, maximum: 60}
         height: {type: integer, minimum: 4, maximum: 60}
@@ -4676,8 +4831,19 @@ components:
           stand_id: {type: string, format: uuid}
           event_slot_id: {type: string, format: uuid}
           event_name: {type: string, minLength: 1}
+          event_status:
+            type: string
+            enum: [draft, published, live, completed, cancelled]
+            description: Status acara. Status booking dilaporkan terpisah.
           created_at: {type: string, format: date-time}
           accepted_policy_version: {type: string, minLength: 1}
+    BookingListItem:
+      allOf:
+      - {$ref: '#/components/schemas/BookingDetail'}
+      - type: object
+        required: [needs_revision_response]
+        properties:
+          needs_revision_response: {type: boolean}
     ServerTime:
       type: object
       required: [server_now]
@@ -4704,6 +4870,7 @@ components:
         required: [accepted_policy_version]
         properties:
           accepted_policy_version: {type: string, minLength: 1, maxLength: 80}
+          event_revision_id: {type: string, format: uuid, description: Salin ID revisi dari hasil quote apabila tersedia.}
           expected_price:
             allOf:
             - {$ref: '#/components/schemas/BookingPrice'}
@@ -4712,9 +4879,17 @@ components:
       allOf:
       - {$ref: '#/components/schemas/HoldSelection'}
       - type: object
-        required: [event_name, event_terms, refund_policy_version, refund_terms, price]
+        required: [event_name, event_city, event_address, event_timezone, slot_starts_at, slot_ends_at, event_terms, refund_policy_version, refund_terms, price]
         properties:
           event_name: {type: string}
+          event_city: {type: string}
+          event_address: {type: string}
+          event_timezone: {type: string}
+          slot_starts_at: {type: string, format: date-time}
+          slot_ends_at: {type: string, format: date-time}
+          event_revision_id: {type: string, format: uuid}
+          stand_code: {type: string, description: Kode stand dari denah acara.}
+          block_label: {type: string, description: Nama blok ketika stand berada di dalam blok.}
           event_terms: {type: string}
           refund_policy_version: {type: string}
           refund_terms: {type: string}
