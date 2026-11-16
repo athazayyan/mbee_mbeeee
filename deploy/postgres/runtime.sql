@@ -94,6 +94,7 @@ GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, 
     ON public.organization_event_history TO :"api_role";
 
 \if :runtime_booking_hold
+GRANT SELECT ON public.hold_policy_versions TO :"api_role";
 GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
     INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
         rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
