@@ -48,6 +48,11 @@ REVOKE SELECT (block_id, status), UPDATE (status),
     ON public.allocations FROM :"api_role";
 REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history FROM :"api_role";
+REVOKE INSERT (event_id, business_id, submitted_by, preferred_stand_ids),
+    UPDATE (status, reason, booking_id, decided_by, decided_at, updated_at) ON public.applications FROM :"api_role";
+REVOKE INSERT (application_id, actor_id, from_status, to_status, reason)
+    ON public.application_status_history FROM :"api_role";
+REVOKE UPDATE (registration_mode) ON public.events FROM :"api_role";
 -- Event revision proposals are paused. Existing revisions remain readable for booking snapshots.
 REVOKE INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
     ON public.event_revisions FROM :"api_role";
@@ -123,6 +128,12 @@ GRANT SELECT (block_id, status), UPDATE (status),
     ON public.allocations TO :"api_role";
 GRANT INSERT (booking_id, actor_id, from_status, to_status, reason)
     ON public.booking_status_history TO :"api_role";
+GRANT SELECT ON public.applications TO :"api_role";
+GRANT INSERT (event_id, business_id, submitted_by, preferred_stand_ids),
+    UPDATE (status, reason, booking_id, decided_by, decided_at, updated_at) ON public.applications TO :"api_role";
+GRANT INSERT (application_id, actor_id, from_status, to_status, reason)
+    ON public.application_status_history TO :"api_role";
+GRANT UPDATE (registration_mode) ON public.events TO :"api_role";
 \endif
 
 \if :runtime_payment_sandbox

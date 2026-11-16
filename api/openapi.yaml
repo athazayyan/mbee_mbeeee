@@ -1520,9 +1520,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: submitApplication
-      summary: '[Rencana] Ajukan kurasi'
-      description: Tenant berhak atas usaha. Pengajuan belum mengunci stand.
-      x-implementation-status: planned
+      summary: Ajukan kurasi
+      description: Tenant berhak atas usaha. Hanya untuk acara dengan registration_mode curated. Pengajuan belum mengunci stand atau kuota. Satu pengajuan aktif per usaha dan acara.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1572,13 +1572,114 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+    get:
+      tags: [Kurasi dan booking]
+      operationId: listEventApplications
+      summary: Daftar pengajuan untuk penyelenggara
+      description: Hanya pemilik organisasi acara. Terbaru lebih dulu.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Daftar pengajuan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Application'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /applications:
+    get:
+      tags: [Kurasi dan booking]
+      operationId: listBusinessApplications
+      summary: Daftar pengajuan milik usaha
+      description: Pemilik usaha. Pengajuan yang offernya lewat batas atau dibatalkan tampil sebagai expired atau withdrawn.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {name: business_id, in: query, required: true, schema: {type: string, format: uuid}}
+      - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Daftar pengajuan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Application'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /events/{id}/registration-mode:
+    put:
+      tags: [Kurasi dan booking]
+      operationId: setRegistrationMode
+      summary: Pilih pendaftaran langsung atau kurasi
+      description: Pemilik organisasi acara. Acara curated hanya dapat dipesan lewat pengajuan yang disetujui. Mode tidak dapat diubah selama ada booking atau pengajuan aktif.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [direct, curated]}
+      responses:
+        '200':
+          description: Mode tersimpan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [mode]
+                    properties:
+                      mode: {type: string, enum: [direct, curated]}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /applications/{id}/approve:
     post:
       tags: [Kurasi dan booking]
       operationId: approveApplication
-      summary: '[Rencana] Setujui pengajuan'
-      description: Penyelenggara mengalokasikan penawaran secara atomik.
-      x-implementation-status: planned
+      summary: Setujui pengajuan
+      description: Pemilik organisasi acara menyetujui dan menetapkan stand serta slot. Server membuat booking held milik pemohon dengan alokasi offer dan batas waktu offer, dalam satu transaksi. Pemohon membayar lewat alur booking biasa. Offer yang lewat batas melepas stand. Satu hold aktif per akun per acara berlaku juga untuk offer (409 APPLICANT_HAS_ACTIVE_BOOKING).
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1632,9 +1733,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: rejectApplication
-      summary: '[Rencana] Tolak pengajuan'
+      summary: Tolak pengajuan
       description: Penyelenggara menyertakan alasan.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4693,6 +4794,9 @@ components:
         status: {type: string, enum: [submitted, approved, rejected, withdrawn, expired]}
         preferred_stand_ids: {type: array, items: {type: string, format: uuid}}
         reason: {type: string, minLength: 1}
+        booking_id: {type: string, format: uuid}
+        offer_expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
     ApplicationInput:
       type: object
       required: [business_id]

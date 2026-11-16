@@ -145,11 +145,13 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		}
 
 		var terms *string
-		if err := tx.QueryRow(ctx, `SELECT terms FROM events WHERE id = $1
-			AND status IN ('published', 'live') FOR NO KEY UPDATE`, input.EventID).Scan(&terms); err != nil {
+		var mode string
+		if err := tx.QueryRow(ctx, `SELECT terms, registration_mode FROM events WHERE id = $1
+			AND status IN ('published', 'live') FOR NO KEY UPDATE`, input.EventID).Scan(&terms, &mode); err != nil {
 			return err
 		}
-		if terms == nil || strings.TrimSpace(*terms) == "" {
+		// Curated events are booked only through an approved application.
+		if mode != "direct" || terms == nil || strings.TrimSpace(*terms) == "" {
 			return ErrNotBookable
 		}
 		var revision string
@@ -204,7 +206,7 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		if ends.Before(expires) {
 			expires = ends
 		}
-		result, err = insertHold(ctx, tx, actor, key, digest[:], input, category, *terms, expires, offer)
+		result, err = insertHold(ctx, tx, actor, key, digest[:], input, category, *terms, expires, offer, "hold")
 		created = err == nil
 		return err
 	})
@@ -235,7 +237,7 @@ func checkQuota(ctx context.Context, tx pgx.Tx, eventID, category string, now ti
 }
 
 func insertHold(ctx context.Context, tx pgx.Tx, actor, key string, digest []byte, input HoldInput,
-	category, terms string, expires time.Time, offer Offer) (Booking, error) {
+	category, terms string, expires time.Time, offer Offer, allocation string) (Booking, error) {
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO bookings (business_id, event_id, category_id, created_by, status, expires_at,
 		price_revision, rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
@@ -247,7 +249,7 @@ func insertHold(ctx context.Context, tx pgx.Tx, actor, key string, digest []byte
 		return Booking{}, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO allocations (booking_id, event_id, event_slot_id, stand_id, block_id, status)
-		VALUES ($1, $2, $3, $4, $5, 'hold')`, id, input.EventID, input.EventSlotID, input.StandID, offer.BlockID)
+		VALUES ($1, $2, $3, $4, $5, $6)`, id, input.EventID, input.EventSlotID, input.StandID, offer.BlockID, allocation)
 	if err != nil {
 		var dbError *pgconn.PgError
 		if errors.As(err, &dbError) && dbError.ConstraintName == "allocations_active_stand_slot_idx" {

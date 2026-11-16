@@ -307,7 +307,7 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	if err := setBookingStatus(ctx, tx, bookingID, bookingStatus, "confirmed", "payment settled"); err != nil {
 		return "", err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status = 'hold'`, bookingID)
+	tag, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status IN ('hold', 'offer')`, bookingID)
 	if err != nil {
 		return "", err
 	}
