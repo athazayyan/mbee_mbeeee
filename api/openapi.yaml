@@ -69,7 +69,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
         '403':
-          description: Origin browser berbeda dari APP_ORIGIN
+          description: Origin browser berbeda dari APP_ORIGIN, atau kode EMAIL_NOT_VERIFIED saat kredensial benar tetapi email belum diverifikasi. Kode itu hanya muncul setelah kata sandi cocok.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -2251,6 +2251,106 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /plans:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: listPlans
+      summary: Daftar paket acara yang dijual
+      description: Harga dan batas stand dari server. Paket berharga 0 aktif tanpa pembayaran.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Daftar paket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Plan'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /events/{id}/plan:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: getEventPlan
+      summary: Status paket sebuah acara
+      description: Anggota organisasi acara. required menunjukkan apakah publikasi menuntut paket aktif. payment terisi bila ada pembayaran yang belum selesai.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Status paket
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PlanState'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /events/{id}/plan/purchases:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: purchaseEventPlan
+      summary: Beli atau lanjutkan pembayaran paket acara
+      description: Pemilik organisasi. Harga dari server, tidak dari klien. Paket gratis aktif langsung tanpa payment. Paket berbayar aktif setelah pembayaran terverifikasi lewat webhook. Pembayaran yang gagal atau kedaluwarsa dapat diulang dengan Idempotency-Key baru. 201 saat baru dibuat, 200 saat mengulang atau paket sudah aktif.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlanPurchaseInput'}
+      responses:
+        '200':
+          description: Pengulangan atau paket sudah aktif
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PlanCheckout'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '201':
+          description: Pembelian dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PlanCheckout'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /webhooks/payments/{provider}:
     post:
@@ -4945,6 +5045,46 @@ components:
         checkout_url: {type: string, format: uri}
         expires_at: {type: string, format: date-time}
         funds_status: {type: string, enum: [held, release_pending, released, frozen]}
+    Plan:
+      type: object
+      required: [code, name, price, currency, capacity_stands]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        price: {$ref: '#/components/schemas/Rupiah'}
+        currency: {type: string, enum: [IDR]}
+        capacity_stands: {type: [integer, 'null'], minimum: 1, description: Batas stand aktif. Null berarti tanpa batas.}
+    PlanPurchase:
+      type: object
+      required: [id, event_id, plan_code, status, amount, capacity_stands]
+      properties:
+        id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        plan_code: {type: string}
+        status: {type: string, enum: [pending, active]}
+        amount: {$ref: '#/components/schemas/Rupiah'}
+        capacity_stands: {type: [integer, 'null'], minimum: 1}
+        activated_at: {type: string, format: date-time}
+    PlanState:
+      type: object
+      required: [required, active, purchase, payment]
+      properties:
+        required: {type: boolean}
+        active: {type: boolean}
+        purchase: {oneOf: [{$ref: '#/components/schemas/PlanPurchase'}, {type: 'null'}]}
+        payment: {oneOf: [{$ref: '#/components/schemas/PaymentAttempt'}, {type: 'null'}]}
+    PlanPurchaseInput:
+      type: object
+      required: [plan_code]
+      properties:
+        plan_code: {type: string, minLength: 1}
+        method: {type: string, enum: [snap], description: Wajib untuk paket berbayar.}
+    PlanCheckout:
+      type: object
+      required: [purchase]
+      properties:
+        purchase: {$ref: '#/components/schemas/PlanPurchase'}
+        payment: {$ref: '#/components/schemas/PaymentAttempt'}
     CheckInInput:
       type: object
       required: [code]

@@ -59,9 +59,11 @@ REVOKE INSERT (event_id, revision, requested_by, reason, snapshot_before, snapsh
 REVOKE INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings FROM :"api_role";
 REVOKE INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions FROM :"api_role";
 REVOKE INSERT (revision_id, event_id, applied_by, supersedes_through) ON public.event_revision_applications FROM :"api_role";
-REVOKE SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
-    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+REVOKE SELECT (id, booking_id, purchase_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
     UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts FROM :"api_role";
+REVOKE INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
+    UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases FROM :"api_role";
 REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
     UPDATE (outcome, attempt_id) ON public.payment_events FROM :"api_role";
 REVOKE SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"api_role";
@@ -114,6 +116,9 @@ GRANT INSERT (event_id, actor_id, from_status, to_status, reason) ON public.even
 GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.event_pricing_versions TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
+GRANT SELECT ON public.event_plans, public.event_plan_purchases TO :"api_role";
+GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
+    UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
 
 \if :runtime_booking_hold
@@ -140,8 +145,8 @@ GRANT UPDATE (registration_mode) ON public.events TO :"api_role";
 GRANT SELECT (created_by), UPDATE (status) ON public.bookings TO :"api_role";
 GRANT UPDATE (status) ON public.allocations TO :"api_role";
 GRANT INSERT (booking_id, from_status, to_status, reason) ON public.booking_status_history TO :"api_role";
-GRANT SELECT (id, booking_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
-    INSERT (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
+GRANT SELECT (id, booking_id, purchase_id, created_by, provider, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest),
+    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest),
     UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts TO :"api_role";
 GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
     UPDATE (outcome, attempt_id) ON public.payment_events TO :"api_role";

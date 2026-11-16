@@ -17,6 +17,8 @@ var errDraftRequired = errors.New("event must be a draft")
 type Store struct {
 	DB               *pgxpool.Pool
 	PricingInventory HoldInventory
+	// RequirePlan makes publication depend on an active paid plan for the event (E16-04).
+	RequirePlan bool
 }
 
 type event struct {

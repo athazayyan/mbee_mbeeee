@@ -193,6 +193,8 @@ func sendError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, errConflict):
 		httpapi.Error(c, http.StatusConflict, "ACCOUNT_CONFLICT", "Akun tidak dapat dibuat dengan email ini.", nil)
+	case errors.Is(err, ErrEmailNotVerified):
+		httpapi.Error(c, http.StatusForbidden, "EMAIL_NOT_VERIFIED", "Email belum diverifikasi. Buka tautan verifikasi di emailmu atau kirim ulang.", nil)
 	case errors.Is(err, errSession):
 		httpapi.Error(c, http.StatusUnauthorized, "INVALID_SESSION", "Kredensial atau sesi tidak valid.", nil)
 	default:
