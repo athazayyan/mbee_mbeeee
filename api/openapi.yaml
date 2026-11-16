@@ -867,7 +867,7 @@ paths:
       tags: [Acara dan katalog]
       operationId: publishEvent
       summary: '[Rencana] Terbitkan acara'
-      description: Denah, harga dan syarat harus valid.
+      description: Pemilik organisasi menerbitkan draft dengan denah valid dan syarat acara. Harga efektif dan versi terjadwal harus mencakup setiap slot yang belum berakhir saat versi itu berlaku. Pengulangan untuk acara yang sudah terbit mengembalikan acara yang sama.
       x-implementation-status: planned
       security:
       - AccessCookie: []
@@ -908,7 +908,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '422':
-          description: Isi request gagal divalidasi
+          description: EVENT_NOT_READY jika jadwal, denah, harga, atau syarat acara belum memenuhi syarat publikasi.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

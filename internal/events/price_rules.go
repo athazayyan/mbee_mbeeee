@@ -107,14 +107,17 @@ type priceQuote struct {
 	MultiplierBPS int32 `json:"multiplier_bps"`
 }
 
-func (rules priceRules) quote(slotID string, confirmed, capacity int32) (priceQuote, error) {
-	base := rules.DefaultBasePrice
+func (rules priceRules) baseForSlot(slotID string) *int64 {
 	for _, slot := range rules.SlotPrices {
 		if slot.EventSlotID == slotID {
-			base = slot.BasePrice
-			break
+			return slot.BasePrice
 		}
 	}
+	return rules.DefaultBasePrice
+}
+
+func (rules priceRules) quote(slotID string, confirmed, capacity int32) (priceQuote, error) {
+	base := rules.baseForSlot(slotID)
 	if base == nil {
 		return priceQuote{}, fieldErrors{"event_slot_id": "Slot ini belum memiliki harga."}
 	}
