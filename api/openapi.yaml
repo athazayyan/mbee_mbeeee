@@ -1399,8 +1399,8 @@ paths:
     put:
       tags: [Denah dan harga]
       operationId: replacePricing
-      summary: Tetapkan versi aturan harga draft
-      description: Setiap penyimpanan membuat revisi. Harga dasar menggunakan urutan stand, blok, slot, lalu acara. Harga stand dan blok memerlukan sumber denah aktif. Waktu server dipakai sebagai effective_at jika tidak diisi.
+      summary: Tetapkan versi aturan harga acara
+      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
       x-implementation-status: implemented
       security:
       - AccessCookie: []

@@ -284,6 +284,8 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Acara atau organisasi tidak ditemukan.", nil)
 	case errors.Is(err, errDraftRequired):
 		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_DRAFT", "Aksi ini hanya tersedia pada draft acara.", nil)
+	case errors.Is(err, errPricingClosed):
+		httpapi.Error(c, http.StatusConflict, "EVENT_PRICING_CLOSED", "Harga acara sudah tidak dapat diubah.", nil)
 	case errors.Is(err, errRevisionRequired):
 		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Perubahan material perlu diajukan sebagai revisi karena acara memiliki booking aktif.", nil)
 	case errors.Is(err, errRevisionUnavailable):
