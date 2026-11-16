@@ -19,7 +19,8 @@ const (
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/me", sessions.WithAccount(s.me))
-	api.GET("/business-categories", sessions.WithAccount(s.listCategories))
+	// Kategori usaha bersifat publik: situs memakainya untuk filter katalog tanpa login.
+	api.GET("/business-categories", s.listPublicCategories)
 	api.GET("/businesses/:id", sessions.WithAccount(s.getBusiness))
 	api.GET("/businesses/:id/consents", sessions.WithAccount(s.listConsents))
 	api.GET("/organizations/:id", sessions.WithAccount(s.getOrganization))
@@ -45,7 +46,11 @@ func (s Store) me(c *gin.Context, account auth.Account) {
 	writeResult(c, http.StatusOK, accountProfile{Account: account, Memberships: memberships}, err)
 }
 
-func (s Store) listCategories(c *gin.Context, _ auth.Account) {
+func (s Store) listPublicCategories(c *gin.Context) {
+	if s.DB == nil {
+		httpapi.Error(c, http.StatusServiceUnavailable, "CATEGORIES_UNAVAILABLE", "Kategori usaha belum dapat dimuat.", nil)
+		return
+	}
 	categories, err := s.categories(c.Request.Context())
 	writeResult(c, http.StatusOK, categories, err)
 }

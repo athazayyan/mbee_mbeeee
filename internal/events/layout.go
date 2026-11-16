@@ -484,29 +484,12 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		if err != nil {
 			return err
 		}
-		var slotID string
-		var slotEnds time.Time
-		if err := tx.QueryRow(ctx, `SELECT id::text, ends_at FROM event_slots
-			WHERE event_id = $1 ORDER BY (ends_at > $2) DESC, starts_at, id LIMIT 1`, eventID, at).Scan(&slotID, &slotEnds); err != nil {
-			return err
-		}
-		taken := make(map[string]bool)
-		rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status = 'reserved' AND b.status = 'confirmed' FROM allocations a
-			JOIN bookings b ON b.id = a.booking_id
-			WHERE a.event_id = $1 AND a.event_slot_id = $2 AND a.status IN ('hold', 'offer', 'reserved')
-			AND NOT (a.status IN ('hold', 'offer') AND b.status IN ('held', 'payment_pending') AND b.expires_at <= $3)`, eventID, slotID, at)
+		slotID, slotEnds, err := publicLayoutSlot(ctx, tx, eventID, at)
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			var stand string
-			var confirmed bool
-			if err := rows.Scan(&stand, &confirmed); err != nil {
-				return err
-			}
-			taken[stand] = confirmed
-		}
-		if err := rows.Err(); err != nil {
+		taken, err := takenStands(ctx, tx, eventID, slotID, at)
+		if err != nil {
 			return err
 		}
 		prices, err := standPrices(ctx, tx, eventID, slotID, at, layout, taken)
@@ -537,7 +520,15 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 	return result, err
 }
 
-// standPrices quotes each active stand with the active pricing rules for the whole-event slot.
+func publicLayoutSlot(ctx context.Context, tx pgx.Tx, eventID string, at time.Time) (string, time.Time, error) {
+	var slotID string
+	var slotEnds time.Time
+	err := tx.QueryRow(ctx, `SELECT id::text, ends_at FROM event_slots
+		WHERE event_id = $1 ORDER BY (ends_at > $2) DESC, starts_at, id LIMIT 1`, eventID, at).Scan(&slotID, &slotEnds)
+	return slotID, slotEnds, err
+}
+
+// standPrices quotes each active stand with the active pricing rules for the selected slot.
 func standPrices(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time.Time, layout layoutRevision, confirmedByStand map[string]bool) (map[string]*int64, error) {
 	prices := make(map[string]*int64, len(layout.Stands))
 	active, err := loadPriceVersion(ctx, tx, activePricingQuery, eventID, at)

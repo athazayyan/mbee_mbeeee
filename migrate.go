@@ -74,6 +74,9 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 			)`); err != nil {
 			return err
 		}
+		if err := reconcileCatalogMigration(ctx, tx); err != nil {
+			return err
+		}
 
 		previous := 0
 		for _, file := range files {
@@ -133,6 +136,20 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		return nil
 	})
 	return applied, err
+}
+
+func reconcileCatalogMigration(ctx context.Context, tx pgx.Tx) error {
+	const catalogFile = "00012_catalog.up.sql"
+	content, err := migrations.ReadFile("migrations/" + catalogFile)
+	if err != nil {
+		return err
+	}
+	// The catalog and hold-policy branches both used version 10. Keep the
+	// original catalog application date and only move the exact old migration.
+	checksum := fmt.Sprintf("%x", sha256.Sum256(content))
+	_, err = tx.Exec(ctx, `UPDATE schema_migrations SET version = 12, name = $1
+		WHERE version = 10 AND name = '00010_catalog.up.sql' AND checksum = $2`, catalogFile, checksum)
+	return err
 }
 
 // The account-recovery branch used a name-only ledger before joining the versioned runner.
