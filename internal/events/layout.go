@@ -481,22 +481,8 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		if err != nil {
 			return err
 		}
-		taken := make(map[string]string)
-		rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status FROM allocations a
-			WHERE a.event_id = $1 AND a.status IN ('hold', 'offer', 'reserved')`, eventID)
+		taken, err := takenStands(ctx, tx, eventID)
 		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var stand, allocation string
-			if err := rows.Scan(&stand, &allocation); err != nil {
-				return err
-			}
-			if taken[stand] != "reserved" {
-				taken[stand] = allocation
-			}
-		}
-		if err := rows.Err(); err != nil {
 			return err
 		}
 		prices, err := standPrices(ctx, tx, eventID, layout, taken)
