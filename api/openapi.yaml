@@ -1918,6 +1918,50 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/event-revisions/{revision_id}/decision:
+    put:
+      tags: [Kurasi dan booking]
+      operationId: decideBookingEventRevision
+      summary: Catat keputusan tenant atas usulan revisi acara
+      description: Pemilik usaha dapat mencatat satu keputusan untuk booking aktif yang terdampak. Mengulang pilihan yang sama mengembalikan keputusan semula. Aksi ini hanya mencatat keputusan tenant.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: revision_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+      responses:
+        '200':
+          description: Keputusan yang tersimpan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/EventRevisionDecision'}
+                  meta: {type: object}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/cancel:
     post:
       tags: [Kurasi dan booking]
@@ -4330,13 +4374,28 @@ components:
         created_at: {type: string, format: date-time}
     BookingEventRevision:
       type: object
-      required: [id, revision, before, after, created_at]
+      required: [id, revision, before, after, created_at, decision, decided_at, can_decide]
       properties:
         id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
         before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         created_at: {type: string, format: date-time}
+        decision:
+          anyOf:
+          - {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+          - {type: 'null'}
+        decided_at: {type: [string, 'null'], format: date-time}
+        can_decide: {type: boolean}
+    EventRevisionDecisionChoice:
+      type: string
+      enum: [approved, declined]
+    EventRevisionDecision:
+      type: object
+      required: [decision, decided_at]
+      properties:
+        decision: {$ref: '#/components/schemas/EventRevisionDecisionChoice'}
+        decided_at: {type: string, format: date-time}
     StandLayout:
       type: object
       required: [stand_id, code, x, y, width, height, rotation]

@@ -80,6 +80,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.PUT("/events/:id/pricing", sessions.WithAccount(s.replacePricing))
 	mutations.POST("/events/:id/pricing/preview", sessions.WithAccount(s.previewPrice))
 	mutations.POST("/events/:id/revisions", sessions.WithAccount(s.proposeRevision))
+	mutations.PUT("/bookings/:id/event-revisions/:revision_id/decision", sessions.WithAccount(s.decideBookingRevision))
 	mutations.PUT("/events/:id/layout", sessions.WithAccount(s.replaceLayout))
 }
 
