@@ -67,6 +67,14 @@ func run(ctx context.Context) error {
 		}
 		maxActiveHolds = limit
 	}
+	holdDuration := 15 * time.Minute
+	if raw := os.Getenv("BOOKING_HOLD_DURATION"); raw != "" {
+		duration, err := time.ParseDuration(raw)
+		if err != nil || duration < time.Second {
+			return errors.New("BOOKING_HOLD_DURATION must be a duration of at least 1s, for example 15m")
+		}
+		holdDuration = duration
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -163,7 +171,7 @@ func run(ctx context.Context) error {
 		bookings.Routes(api, service)
 		if maxActiveHolds > 0 {
 			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
-			settings := booking.HoldSettings{Lifetime: 15 * time.Minute, MaxActive: maxActiveHolds}
+			settings := booking.HoldSettings{Lifetime: holdDuration, MaxActive: maxActiveHolds}
 			if err := bookings.HoldRoutes(api, service, origin, settings, source); err != nil {
 				return err
 			}
