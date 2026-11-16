@@ -1712,7 +1712,7 @@ paths:
       tags: [Kurasi dan booking]
       operationId: listBookings
       summary: Daftar booking usaha
-      description: Hanya pemilik usaha. Urutan dari waktu pembuatan terbaru dengan pagination cursor.
+      description: Hanya pemilik usaha. Urutan dari waktu pembuatan terbaru dengan pagination cursor. Booking yang masih dapat menanggapi usulan revisi diberi penanda.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1721,6 +1721,10 @@ paths:
         in: query
         required: true
         schema: {type: string, format: uuid}
+      - name: needs_revision_response
+        in: query
+        schema: {type: boolean, default: false}
+        description: Jika true, tampilkan hanya booking dengan usulan revisi yang masih perlu dijawab.
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -1732,7 +1736,7 @@ paths:
                 type: object
                 required: [data, meta]
                 properties:
-                  data: {type: array, items: {$ref: '#/components/schemas/BookingDetail'}}
+                  data: {type: array, items: {$ref: '#/components/schemas/BookingListItem'}}
                   meta:
                     allOf:
                     - {$ref: '#/components/schemas/CursorMeta'}
@@ -4709,6 +4713,13 @@ components:
           event_name: {type: string, minLength: 1}
           created_at: {type: string, format: date-time}
           accepted_policy_version: {type: string, minLength: 1}
+    BookingListItem:
+      allOf:
+      - {$ref: '#/components/schemas/BookingDetail'}
+      - type: object
+        required: [needs_revision_response]
+        properties:
+          needs_revision_response: {type: boolean}
     ServerTime:
       type: object
       required: [server_now]

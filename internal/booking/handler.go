@@ -119,7 +119,13 @@ func (s Store) listBookings(c *gin.Context, account auth.Account) {
 	if id != "" {
 		beforeID = &id
 	}
-	bookings, now, err := s.list(c.Request.Context(), account.ID, business, before, beforeID, limit+1)
+	filter := c.Query("needs_revision_response")
+	if filter != "" && filter != "true" && filter != "false" {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Parameter tidak valid.",
+			map[string]string{"needs_revision_response": "Gunakan true atau false."})
+		return
+	}
+	bookings, now, err := s.list(c.Request.Context(), account.ID, business, before, beforeID, limit+1, filter == "true")
 	if err != nil {
 		writeReadError(c, err)
 		return
