@@ -14,14 +14,16 @@ import (
 
 type HoldStand struct {
 	ID                 string
+	Code               string
 	BlockID            *string
+	BlockLabel         string
 	AllowedCategoryIDs []string
 }
 
 type HoldInventory interface {
 	// ActiveStands returns the active capacity for this event and slot, including
 	// stands with holds or reservations. IDs are unique canonical UUIDs. An empty
-	// category list allows all.
+	// category list allows all. Implementations must support read-only transactions.
 	ActiveStands(ctx context.Context, tx pgx.Tx, eventID, slotID string) ([]HoldStand, error)
 }
 

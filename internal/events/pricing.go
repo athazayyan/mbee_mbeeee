@@ -42,9 +42,10 @@ type pricedSlot struct {
 }
 
 type pricingState struct {
-	Slots  []pricedSlot  `json:"slots"`
-	Active *priceVersion `json:"active"`
-	Latest *priceVersion `json:"latest"`
+	Slots     []pricedSlot      `json:"slots"`
+	Active    *priceVersion     `json:"active"`
+	Latest    *priceVersion     `json:"latest"`
+	Inventory *pricingInventory `json:"inventory,omitempty"`
 }
 
 const activePricingQuery = `SELECT event_id, revision::text, effective_at, rules
@@ -76,6 +77,9 @@ func (s Store) getPricing(c *gin.Context, account auth.Account) {
 			return err
 		}
 		state.Active, err = loadPriceVersion(ctx, tx, activePricingQuery, eventID, nil)
+		if err == nil && s.PricingInventory != nil {
+			state.Inventory, err = readPricingInventory(ctx, tx, s.PricingInventory, eventID, state.Slots)
+		}
 		return err
 	})
 	if err != nil {
