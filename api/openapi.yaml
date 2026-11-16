@@ -372,9 +372,9 @@ paths:
       tags: [Akun dan sesi]
       operationId: listBusinessCategories
       summary: 'Daftar kategori usaha'
+      description: Publik tanpa sesi; situs memakainya untuk filter katalog.
       x-implementation-status: implemented
-      security:
-      - AccessCookie: []
+      security: []
       responses:
         '200':
           description: Berhasil
@@ -661,9 +661,12 @@ paths:
     get:
       tags: [Acara dan katalog]
       operationId: listEvents
-      summary: '[Rencana] Daftar acara publik'
-      description: Katalog published/live. Filter slug merupakan pencocokan persis.
-      x-implementation-status: planned
+      summary: Daftar acara publik
+      description: Tanpa sesi. Bawaan hanya acara published dan live, diurutkan dari tanggal mulai terdekat.
+        Filter slug merupakan pencocokan persis dan juga mengembalikan acara completed atau cancelled.
+        category_id memilih acara yang memiliki stand aktif untuk kategori itu. capacity, min_rent, dan
+        max_rent dihitung dari denah dan versi harga aktif bila tersedia.
+      x-implementation-status: implemented
       security: []
       parameters:
       - name: slug
@@ -678,6 +681,16 @@ paths:
         in: query
         required: false
         schema: {type: string, format: uuid}
+      - name: organization_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
+        description: Acara milik satu penyelenggara, untuk halaman profil penyelenggara.
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, minLength: 1, maxLength: 120}
+        description: Kata kunci pada nama acara, kota, atau deskripsi tanpa membedakan huruf besar kecil.
       - name: starts_from
         in: query
         required: false
@@ -713,9 +726,9 @@ paths:
     get:
       tags: [Acara dan katalog]
       operationId: getEvent
-      summary: '[Rencana] Detail acara publik'
-      description: Draft dan data privat tidak ikut dipublikasikan.
-      x-implementation-status: planned
+      summary: Detail acara publik
+      description: Tanpa sesi. Semua status kecuali draft; draft dijawab 404.
+      x-implementation-status: implemented
       security: []
       parameters:
       - name: id
@@ -4183,9 +4196,10 @@ components:
         terms: {type: string, minLength: 1}
     PublicEvent:
       type: object
-      required: [id, organization_id, name, slug, status, starts_at, ends_at, timezone, city]
+      required: [id, organization_id, organization_name, name, slug, status, starts_at, ends_at, timezone, city]
       properties:
         id: {type: string, format: uuid}
+        organization_name: {type: string, minLength: 1}
         organization_id: {type: string, format: uuid}
         status: {type: string, enum: [published, live, completed, cancelled]}
         name: {type: string, minLength: 1}
@@ -4201,7 +4215,7 @@ components:
         banner_url: {type: string, format: uri}
         min_rent: {$ref: '#/components/schemas/Rupiah'}
         max_rent: {$ref: '#/components/schemas/Rupiah'}
-        capacity: {type: integer, minimum: 0}
+        capacity: {type: integer, minimum: 0, description: Jumlah stand aktif di denah; tidak ada bila acara belum punya denah.}
     EventCreate:
       type: object
       additionalProperties: false
