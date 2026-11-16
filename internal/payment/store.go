@@ -22,6 +22,8 @@ var (
 type Store struct {
 	DB       *pgxpool.Pool
 	Provider *Midtrans
+	// PlanRequired reports whether publication needs an active plan; it is informational for clients.
+	PlanRequired bool
 }
 
 type Attempt struct {
@@ -41,7 +43,7 @@ type Input struct {
 
 func (s Store) Ready(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `SELECT 1 FROM payment_attempts, payment_events, payment_exceptions,
-		ledger_transactions, ledger_entries LIMIT 0`)
+		ledger_transactions, ledger_entries, event_plans, event_plan_purchases LIMIT 0`)
 	return err
 }
 
@@ -68,13 +70,13 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 			return err
 		}
 		var prior []byte
-		var priorBooking string
+		var priorBooking *string
 		row := tx.QueryRow(ctx, `SELECT `+attemptColumns+`, request_digest, booking_id FROM payment_attempts
 			WHERE created_by = $1 AND idempotency_key = $2`, actor, key)
 		var a Attempt
 		err := row.Scan(&a.ID, &a.Status, &a.Amount, &a.Currency, &a.Provider, &a.CheckoutURL, &a.ExpiresAt, &prior, &priorBooking)
 		if err == nil {
-			if !bytes.Equal(prior, digest[:]) || priorBooking != bookingID {
+			if !bytes.Equal(prior, digest[:]) || priorBooking == nil || *priorBooking != bookingID {
 				return ErrIdempotencyMismatch
 			}
 			result = a
@@ -224,20 +226,21 @@ func (s Store) ApplyNotification(ctx context.Context, n Notification, raw []byte
 }
 
 func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int64) (string, error) {
-	exception := func(kind string, attempt, booking *string, detail map[string]any) error {
+	exception := exceptionFn(func(kind string, attempt, booking *string, detail map[string]any) error {
 		detail["order_id"], detail["provider_status"] = n.OrderID, n.TransactionStatus
 		raw, _ := json.Marshal(detail)
 		_, err := tx.Exec(ctx, `INSERT INTO payment_exceptions (attempt_id, booking_id, kind, detail) VALUES ($1, $2, $3, $4)`,
 			attempt, booking, kind, raw)
 		return err
-	}
+	})
 
-	var attemptID, bookingID, status string
+	var attemptID, status string
+	var bookingRef, purchaseRef *string
 	var amount int64
 	err := pgx.ErrNoRows
 	if httpapi.ValidID(n.OrderID) {
-		err = tx.QueryRow(ctx, `SELECT id, booking_id, status, amount FROM payment_attempts WHERE id = $1 FOR UPDATE`,
-			n.OrderID).Scan(&attemptID, &bookingID, &status, &amount)
+		err = tx.QueryRow(ctx, `SELECT id, booking_id, purchase_id, status, amount FROM payment_attempts WHERE id = $1 FOR UPDATE`,
+			n.OrderID).Scan(&attemptID, &bookingRef, &purchaseRef, &status, &amount)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "ignored", exception("unknown_order", nil, nil, map[string]any{})
@@ -251,13 +254,17 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 
 	gross, ok := wholeRupiah(n.GrossAmount)
 	if !ok || gross != amount || (n.Currency != "" && n.Currency != "IDR") {
-		return "rejected", exception("amount_mismatch", &attemptID, &bookingID,
+		return "rejected", exception("amount_mismatch", &attemptID, bookingRef,
 			map[string]any{"expected": amount, "got": n.GrossAmount, "currency": n.Currency})
 	}
 	next, ok := n.outcome()
 	if !ok || status == "paid" {
 		return "ignored", nil
 	}
+	if purchaseRef != nil {
+		return s.applyPlan(ctx, tx, attemptID, *purchaseRef, status, amount, next, exception)
+	}
+	bookingID := *bookingRef
 
 	switch next {
 	case "pending":
@@ -307,7 +314,7 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	if err := setBookingStatus(ctx, tx, bookingID, bookingStatus, "confirmed", "payment settled"); err != nil {
 		return "", err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status = 'hold'`, bookingID)
+	tag, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status IN ('hold', 'offer')`, bookingID)
 	if err != nil {
 		return "", err
 	}
@@ -335,3 +342,5 @@ func recordPayment(ctx context.Context, tx pgx.Tx, attemptID string, total, rent
 		) AS v(account, direction, amount) WHERE amount > 0`, txID, total, rent, platformFee, providerFee)
 	return err
 }
+
+type exceptionFn func(kind string, attempt, booking *string, detail map[string]any) error

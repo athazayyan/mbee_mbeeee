@@ -89,6 +89,10 @@ Jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS
 
 ## Pembayaran sandbox
 
+Login menolak akun yang emailnya belum diverifikasi dengan `403 EMAIL_NOT_VERIFIED`, tetapi hanya setelah kata sandi cocok. Ini aktif secara bawaan. Isi `AUTH_REQUIRE_VERIFIED_EMAIL=false` untuk QA lokal. Akun lama yang belum terverifikasi tidak diubah otomatis. Di database QA, verifikasi manual dengan `UPDATE users SET email_verified_at = now() WHERE email_verified_at IS NULL;` atau minta tautan lewat halaman verifikasi email.
+
+Paket acara berbayar (E16-04) memakai tabel `event_plans`. Paket `standard` dibuat dengan harga Rp0, jadi aktif tanpa pembayaran. Ubah `price` di tabel itu sebelum produksi. Isi `EVENT_PLAN_REQUIRED=true` agar publikasi menuntut paket aktif dan batas stand dari paket. Nilai bawaan kosong, sehingga acara yang ada tidak terpengaruh. Pembelian paket berbayar memakai Midtrans dan webhook yang sama dengan sewa stand.
+
 Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
 
 ## Verifikasi lokal

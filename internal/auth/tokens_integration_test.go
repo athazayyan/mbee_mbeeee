@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -232,5 +235,50 @@ func TestResetTokenCannotVerifyEmail(t *testing.T) {
 	}
 	if err := s.verifyEmail(ctx, mailer.last(t, "reset", account.Email)); !errors.Is(err, ErrInvalidOrExpiredToken) {
 		t.Fatalf("token purposes are not separated: %v", err)
+	}
+}
+
+func TestLoginRequiresVerifiedEmail(t *testing.T) {
+	s, pool, mailer, ctx := newTokenFixture(t)
+	const password = "verified login password"
+	account := registerFixture(t, s, pool, ctx, password)
+
+	// Off by default, so existing accounts and fixtures keep working.
+	if _, _, err := s.login(ctx, account.Email, password); err != nil {
+		t.Fatalf("login with the requirement off: %v", err)
+	}
+
+	s.RequireVerifiedEmail(true)
+	if _, _, err := s.login(ctx, account.Email, password); !errors.Is(err, ErrEmailNotVerified) {
+		t.Fatalf("unverified login: got %v", err)
+	}
+	// A wrong password or unknown address must look the same as before, so nothing leaks about registration.
+	if _, _, err := s.login(ctx, account.Email, "wrong password entirely"); !errors.Is(err, errSession) {
+		t.Fatalf("wrong password on unverified account: got %v", err)
+	}
+	if _, _, err := s.login(ctx, "nobody-"+account.Email, password); !errors.Is(err, errSession) {
+		t.Fatalf("unknown email: got %v", err)
+	}
+	var sessions int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM sessions WHERE user_id = $1", account.ID).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatalf("refused login must not create a session: count=%d err=%v", sessions, err)
+	}
+
+	if err := s.verifyEmail(ctx, mailer.last(t, "verify", account.Email)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.login(ctx, account.Email, password); err != nil {
+		t.Fatalf("login after verification: %v", err)
+	}
+}
+
+func TestEmailNotVerifiedResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	sendError(c, ErrEmailNotVerified)
+	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), `"code":"EMAIL_NOT_VERIFIED"`) {
+		t.Fatalf("got %d %s", recorder.Code, recorder.Body.String())
 	}
 }

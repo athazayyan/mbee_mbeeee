@@ -74,7 +74,7 @@ func (s Store) publicationReadiness(ctx context.Context, actor, id string, layou
 		if err := tx.QueryRow(ctx, `SELECT transaction_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
-		err = checkPublication(ctx, tx, current, layout, now)
+		err = s.withPlan(ctx, tx, current.ID, checkPublication(ctx, tx, current, layout, now))
 		var fields fieldErrors
 		if errors.As(err, &fields) {
 			result.Fields = fields
@@ -104,7 +104,7 @@ func (s Store) publishDraft(ctx context.Context, actor, id string, layout Publis
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
-		if err := checkPublication(ctx, tx, current, layout, now); err != nil {
+		if err := s.withPlan(ctx, tx, current.ID, checkPublication(ctx, tx, current, layout, now)); err != nil {
 			return err
 		}
 		result, err = scanEvent(tx.QueryRow(ctx, `UPDATE events e SET status = 'published', updated_at = clock_timestamp()
@@ -198,4 +198,37 @@ func coversOpenSlots(rules priceRules, slots []pricedSlot, at time.Time) bool {
 		}
 	}
 	return true
+}
+
+// withPlan adds the paid-plan requirement to the result of checkPublication when it is enabled.
+func (s Store) withPlan(ctx context.Context, tx pgx.Tx, eventID string, err error) error {
+	if !s.RequirePlan {
+		return err
+	}
+	var fields fieldErrors
+	if err != nil && !errors.As(err, &fields) {
+		return err
+	}
+	if fields == nil {
+		fields = make(fieldErrors)
+	}
+	var active bool
+	var capacity *int
+	var stands int
+	if qerr := tx.QueryRow(ctx, `SELECT true, p.capacity_stands, (SELECT count(*) FROM stands s
+			WHERE s.event_id = $1 AND s.removed_at IS NULL AND s.active)
+		FROM event_plan_purchases p WHERE p.event_id = $1 AND p.status = 'active'`, eventID).Scan(&active, &capacity, &stands); qerr != nil &&
+		!errors.Is(qerr, pgx.ErrNoRows) {
+		return qerr
+	}
+	switch {
+	case !active:
+		fields["plan"] = "Aktifkan paket acara sebelum terbit."
+	case capacity != nil && stands > *capacity:
+		fields["plan"] = fmt.Sprintf("Paket mendukung maksimal %d stand aktif, denah memiliki %d.", *capacity, stands)
+	}
+	if len(fields) > 0 {
+		return fields
+	}
+	return nil
 }

@@ -35,11 +35,13 @@ func (r repository) createAccount(ctx context.Context, email string, hash []byte
 	return account, err
 }
 
-func (r repository) credentials(ctx context.Context, email string) (Account, []byte, error) {
+func (r repository) credentials(ctx context.Context, email string) (Account, []byte, bool, error) {
 	account := Account{Email: email}
 	var hash []byte
-	err := r.db.QueryRow(ctx, "SELECT id, password_hash FROM users WHERE email = $1", email).Scan(&account.ID, &hash)
-	return account, hash, err
+	var verified bool
+	err := r.db.QueryRow(ctx, "SELECT id, password_hash, email_verified_at IS NOT NULL FROM users WHERE email = $1", email).
+		Scan(&account.ID, &hash, &verified)
+	return account, hash, verified, err
 }
 
 func (r repository) createSession(ctx context.Context, userID string, expires time.Time, passwordHash, refreshHash []byte) (string, error) {

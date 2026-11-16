@@ -316,3 +316,146 @@ func TestPaymentLifecycle(t *testing.T) {
 		t.Fatal("expected unknown_order exception")
 	}
 }
+
+func TestEventPlanPurchase(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	s := migratedStore(t, ctx)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"token":"tok","redirect_url":"https://pay.example/plan"}`))
+	}))
+	defer provider.Close()
+	s.Provider = NewMidtrans(testKey, "sandbox")
+	s.Provider.SnapURL = provider.URL
+
+	owner := one(t, ctx, s, `INSERT INTO users (email, password_hash) VALUES ('owner@example.com', 'x') RETURNING id`)
+	member := one(t, ctx, s, `INSERT INTO users (email, password_hash) VALUES ('member@example.com', 'x') RETURNING id`)
+	stranger := one(t, ctx, s, `INSERT INTO users (email, password_hash) VALUES ('stranger@example.com', 'x') RETURNING id`)
+	org := one(t, ctx, s, `INSERT INTO organizations (owner_id, name) VALUES ($1, 'Org') RETURNING id`, owner)
+	for user, role := range map[string]string{owner: "owner", member: "member"} {
+		if _, err := s.DB.Exec(ctx, `INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, $3)`, user, org, role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newEvent := func(slug string) string {
+		return one(t, ctx, s, `INSERT INTO events (organization_id, created_by, name, slug, status, starts_at, ends_at,
+			timezone, city, address, terms) VALUES ($1, $2, 'Bazar', $3, 'draft', now(), now() + interval '2 days',
+			'Asia/Jakarta', 'Banda Aceh', 'St', 'T') RETURNING id`, org, owner, slug)
+	}
+
+	// A free plan activates at once and creates no payment.
+	free := newEvent("free")
+	got, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", free, "free-1", PlanInput{PlanCode: "standard"})
+	if err != nil || !created || got.Purchase.Status != "active" || got.Payment != nil {
+		t.Fatalf("free plan: %+v created=%v err=%v", got, created, err)
+	}
+	again, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", free, "free-2", PlanInput{PlanCode: "standard"})
+	if err != nil || created || again.Purchase.ID != got.Purchase.ID {
+		t.Fatalf("second purchase should report the active plan: %+v created=%v err=%v", again, created, err)
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts`) != 0 {
+		t.Fatal("free plan must not open a payment")
+	}
+	if state, err := s.PlanStatus(ctx, member, free); err != nil || !state.Active {
+		t.Fatalf("members can read plan status: %+v %v", state, err)
+	}
+	if _, err := s.PlanStatus(ctx, stranger, free); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stranger read plan status: %v", err)
+	}
+
+	// Paid plan: only owners buy; price comes from the plan, never from the client.
+	if _, err := s.DB.Exec(ctx, `UPDATE event_plans SET price = 100000 WHERE code = 'standard'`); err != nil {
+		t.Fatal(err)
+	}
+	event := newEvent("paid")
+	if _, _, err := s.PurchasePlan(ctx, member, "member@example.com", event, "m-1", PlanInput{PlanCode: "standard", Method: "snap"}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("member purchase: %v", err)
+	}
+	if _, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", event, "u-1", PlanInput{PlanCode: "ghost", Method: "snap"}); !errors.Is(err, ErrPlanUnknown) {
+		t.Fatalf("unknown plan: %v", err)
+	}
+	checkout, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", event, "p-1", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil || !created || checkout.Purchase.Status != "pending" || checkout.Payment == nil ||
+		checkout.Payment.Amount != 100000 || checkout.Payment.CheckoutURL == "" || checkout.Payment.Status != "pending" {
+		t.Fatalf("paid plan: %+v created=%v err=%v", checkout, created, err)
+	}
+	replay, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", event, "p-1", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil || created || replay.Payment == nil || replay.Payment.ID != checkout.Payment.ID {
+		t.Fatalf("replay: %+v created=%v err=%v", replay, created, err)
+	}
+	if _, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", free, "p-1", PlanInput{PlanCode: "standard", Method: "snap"}); !errors.Is(err, ErrIdempotencyMismatch) {
+		t.Fatalf("key reused for another event: %v", err)
+	}
+	reuse, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", event, "p-2", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil || created || reuse.Payment == nil || reuse.Payment.ID != checkout.Payment.ID {
+		t.Fatalf("a second key must reuse the live attempt: %+v created=%v err=%v", reuse, created, err)
+	}
+
+	// A wrong amount cannot activate the plan.
+	n, raw := notify(checkout.Payment.ID, "settlement", "200", "1.00")
+	if err := s.ApplyNotification(ctx, n, raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := one(t, ctx, s, `SELECT status FROM event_plan_purchases WHERE id = $1`, checkout.Purchase.ID); got != "pending" {
+		t.Fatalf("mismatch activated the plan: %s", got)
+	}
+
+	// Settlement activates once, books platform revenue, and ignores replays and stale statuses.
+	n, raw = notify(checkout.Payment.ID, "settlement", "200", "100000.00")
+	for range 3 {
+		if err := s.ApplyNotification(ctx, n, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale, staleRaw := notify(checkout.Payment.ID, "pending", "201", "100000.00")
+	if err := s.ApplyNotification(ctx, stale, staleRaw); err != nil {
+		t.Fatal(err)
+	}
+	if got := one(t, ctx, s, `SELECT status FROM event_plan_purchases WHERE id = $1`, checkout.Purchase.ID); got != "active" {
+		t.Fatalf("purchase %s", got)
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM ledger_transactions WHERE kind = 'plan_payment_received'`) != 1 ||
+		count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+			WHERE t.kind = 'plan_payment_received' AND e.account = 'platform_revenue' AND e.direction = 'credit' AND e.amount = 100000`) != 1 {
+		t.Fatal("expected one balanced plan ledger transaction crediting platform revenue")
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM ledger_transactions WHERE kind = 'payment_received'`) != 0 {
+		t.Fatal("plan payment must not be booked as rent escrow")
+	}
+	if state, err := s.PlanStatus(ctx, owner, event); err != nil || !state.Active || state.Payment != nil {
+		t.Fatalf("status after payment: %+v %v", state, err)
+	}
+
+	// An expired payment leaves the purchase open so the organizer can try again.
+	retry := newEvent("retry")
+	first, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", retry, "r-1", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, raw = notify(first.Payment.ID, "expire", "407", "100000.00")
+	if err := s.ApplyNotification(ctx, n, raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, first.Payment.ID); got != "expired" {
+		t.Fatalf("attempt %s", got)
+	}
+	second, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", retry, "r-2", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil || !created || second.Payment == nil || second.Payment.ID == first.Payment.ID || second.Purchase.ID != first.Purchase.ID {
+		t.Fatalf("retry: %+v created=%v err=%v", second, created, err)
+	}
+	// Replaying the old key still reports the old, expired attempt rather than opening another one.
+	old, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", retry, "r-1", PlanInput{PlanCode: "standard", Method: "snap"})
+	if err != nil || created || old.Payment == nil || old.Payment.ID != first.Payment.ID {
+		t.Fatalf("old key replay: %+v created=%v err=%v", old, created, err)
+	}
+
+	// A cancelled event cannot buy a plan.
+	cancelled := newEvent("cancelled")
+	if _, err := s.DB.Exec(ctx, `UPDATE events SET status = 'cancelled' WHERE id = $1`, cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", cancelled, "c-1", PlanInput{PlanCode: "standard", Method: "snap"}); !errors.Is(err, ErrPlanState) {
+		t.Fatalf("cancelled event: %v", err)
+	}
+}

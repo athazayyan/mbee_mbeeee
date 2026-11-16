@@ -75,6 +75,15 @@ func run(ctx context.Context) error {
 		}
 		holdDuration = duration
 	}
+	offerDuration := 24 * time.Hour
+	if raw := os.Getenv("BOOKING_OFFER_DURATION"); raw != "" {
+		duration, err := time.ParseDuration(raw)
+		if err != nil || duration < time.Second {
+			return errors.New("BOOKING_OFFER_DURATION must be a duration of at least 1s, for example 24h")
+		}
+		offerDuration = duration
+	}
+	planRequired := os.Getenv("EVENT_PLAN_REQUIRED") == "true"
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -114,10 +123,12 @@ func run(ctx context.Context) error {
 			cancel()
 			return err
 		}
+		// Verified email is required by default (E02-09). Set AUTH_REQUIRE_VERIFIED_EMAIL=false only for local QA.
+		service.RequireVerifiedEmail(os.Getenv("AUTH_REQUIRE_VERIFIED_EMAIL") != "false")
 		profiles := identity.Store{DB: pool}
-		eventStore := events.Store{DB: pool, PricingInventory: events.LayoutInventory{}}
+		eventStore := events.Store{DB: pool, PricingInventory: events.LayoutInventory{}, RequirePlan: planRequired}
 		bookings := booking.Store{DB: pool}
-		payments := payment.Store{DB: pool}
+		payments := payment.Store{DB: pool, PlanRequired: planRequired}
 		if key := os.Getenv("MIDTRANS_SERVER_KEY"); key != "" {
 			if os.Getenv("MIDTRANS_ENV") != "sandbox" {
 				cancel()
@@ -136,11 +147,14 @@ func run(ctx context.Context) error {
 				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
 			}
 			if maxActiveHolds > 0 {
+				if _, err := pool.Exec(probe, "SELECT id FROM applications LIMIT 0"); err != nil {
+					return fmt.Errorf("application schema unavailable; run make migrate: %w", err)
+				}
 				if _, err := pool.Exec(probe, "SELECT version FROM hold_policy_versions LIMIT 0"); err != nil {
 					return fmt.Errorf("hold policy store unavailable; check migrations and booking grants: %w", err)
 				}
 			}
-			if payments.Provider != nil {
+			if payments.Provider != nil || planRequired {
 				if err := payments.Ready(probe); err != nil {
 					return fmt.Errorf("payment schema unavailable; check migrations and sandbox grants: %w", err)
 				}
@@ -173,6 +187,9 @@ func run(ctx context.Context) error {
 			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
 			settings := booking.HoldSettings{Lifetime: holdDuration, MaxActive: maxActiveHolds}
 			if err := bookings.HoldRoutes(api, service, origin, settings, source); err != nil {
+				return err
+			}
+			if err := bookings.ApplicationRoutes(api, service, origin, offerDuration, maxActiveHolds, source); err != nil {
 				return err
 			}
 			holdEnabled = true

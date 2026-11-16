@@ -18,6 +18,7 @@ var methods = map[string]bool{"snap": true}
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.POST("/bookings/:id/payments", httpapi.RequireOrigin(origin), sessions.WithAccount(s.createPayment))
 	api.POST("/webhooks/payments/:provider", s.webhook)
+	s.planRoutes(api, sessions, origin)
 }
 
 func (s Store) createPayment(c *gin.Context, account auth.Account) {

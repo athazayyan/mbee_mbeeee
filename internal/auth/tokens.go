@@ -25,6 +25,9 @@ const (
 	resendCooldown = time.Minute
 )
 
+// ErrEmailNotVerified is returned by login when the password is right but the email is not verified.
+var ErrEmailNotVerified = errors.New("email belum diverifikasi")
+
 var ErrInvalidOrExpiredToken = errors.New("token tidak valid atau sudah kedaluwarsa")
 
 func generateActionToken() (raw string, hash []byte, err error) {

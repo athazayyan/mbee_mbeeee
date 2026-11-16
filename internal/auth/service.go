@@ -29,6 +29,8 @@ type Service struct {
 	pepper    []byte
 	dummyHash []byte
 	mailer    Mailer
+	// requireVerified rejects login until the account's email is verified (E02-09).
+	requireVerified bool
 }
 
 func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, error) {
@@ -44,6 +46,11 @@ func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, e
 		return nil, err
 	}
 	return &Service{store: store, key: []byte(key), pepper: []byte(pepper), dummyHash: dummyHash}, nil
+}
+
+// RequireVerifiedEmail makes login fail with ErrEmailNotVerified for unverified accounts.
+func (s *Service) RequireVerifiedEmail(required bool) {
+	s.requireVerified = required
 }
 
 // UseMailer configures account email delivery. Call before Routes.
@@ -113,7 +120,7 @@ func (s *Service) register(ctx context.Context, email, password string) (Account
 }
 
 func (s *Service) login(ctx context.Context, email, password string) (Account, tokens, error) {
-	account, hash, err := s.store.credentials(ctx, email)
+	account, hash, verified, err := s.store.credentials(ctx, email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		hash = s.dummyHash
 	} else if err != nil {
@@ -121,6 +128,10 @@ func (s *Service) login(ctx context.Context, email, password string) (Account, t
 	}
 	if bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil || account.ID == "" {
 		return Account{}, tokens{}, errSession
+	}
+	// Only after the password matched, so this never reveals which emails are registered.
+	if s.requireVerified && !verified {
+		return Account{}, tokens{}, ErrEmailNotVerified
 	}
 	refresh := refreshToken()
 	expires := time.Now().Add(sessionTTL)
