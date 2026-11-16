@@ -572,6 +572,18 @@ type LayoutInventory struct{}
 
 var _ HoldInventory = LayoutInventory{}
 
+func (LayoutInventory) ReadyToPublish(ctx context.Context, tx pgx.Tx, eventID string, slotIDs []string) (bool, error) {
+	if len(slotIDs) == 0 {
+		return false, nil
+	}
+	// All slots share the event layout, so one active stand covers every slot.
+	var ready bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM stands WHERE event_id = $1 AND removed_at IS NULL AND active
+	)`, eventID).Scan(&ready)
+	return ready, err
+}
+
 func (LayoutInventory) ActiveStands(ctx context.Context, tx pgx.Tx, eventID, _ string) ([]HoldStand, error) {
 	rows, err := tx.Query(ctx, `SELECT s.id::text, s.code, s.block_id::text, COALESCE(b.label, ''), s.category_ids::text[]
 		FROM stands s LEFT JOIN layout_blocks b ON b.id = s.block_id AND b.event_id = s.event_id

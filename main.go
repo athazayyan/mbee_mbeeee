@@ -122,6 +122,9 @@ func run(ctx context.Context) error {
 		service.Routes(api, origin)
 		profiles.Routes(api, service, origin)
 		eventStore.Routes(api, service, origin)
+		if err := eventStore.PublishRoutes(api, service, origin, events.LayoutInventory{}); err != nil {
+			return err
+		}
 		bookings.Routes(api, service)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
@@ -148,6 +151,8 @@ func run(ctx context.Context) error {
 		api.POST("/auth/verify-email", unavailable)
 		api.POST("/auth/resend-verification", unavailable)
 		identity.Store{}.Routes(api, nil, "")
+		api.GET("/events/:id/publication-readiness", unavailable)
+		api.POST("/events/:id/publish", unavailable)
 		events.Store{}.Routes(api, nil, "")
 		booking.Store{}.Routes(api, nil)
 	}

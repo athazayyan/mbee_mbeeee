@@ -972,9 +972,9 @@ paths:
     get:
       tags: [Acara dan katalog]
       operationId: getPublicationReadiness
-      summary: '[Rencana] Periksa syarat publikasi draft'
+      summary: Periksa syarat publikasi draft
       description: Pemilik organisasi melihat kesiapan dan masalah publikasi yang ditemukan server. Endpoint publish memeriksa ulang syarat sebelum mengubah status.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1003,9 +1003,9 @@ paths:
     post:
       tags: [Acara dan katalog]
       operationId: publishEvent
-      summary: '[Rencana] Terbitkan acara'
+      summary: Terbitkan acara
       description: Pemilik organisasi menerbitkan draft dengan denah valid dan syarat acara. Harga efektif dan versi terjadwal harus mencakup setiap slot yang belum berakhir saat versi itu berlaku. Pengulangan untuk acara yang sudah terbit mengembalikan acara yang sama.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
