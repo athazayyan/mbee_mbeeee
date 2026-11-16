@@ -61,6 +61,10 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1885825110)"); err != nil {
 			return err
 		}
+		legacyDates, err := replaceNamedMigrationLedger(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			CREATE TABLE IF NOT EXISTS schema_migrations (
 				version integer PRIMARY KEY,
@@ -116,7 +120,8 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 					return fmt.Errorf("apply %s: %w", name, err)
 				}
 			}
-			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)", version, name, checksum); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version, name, checksum, applied_at)
+				VALUES ($1, $2, $3, COALESCE($4, now()))`, version, name, checksum, legacyDates[name]); err != nil {
 				return err
 			}
 			if legacy {
@@ -128,6 +133,50 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		return nil
 	})
 	return applied, err
+}
+
+// The account-recovery branch used a name-only ledger before joining the versioned runner.
+// Read its dates before replacing it in the same transaction as schema validation and migration.
+func replaceNamedMigrationLedger(ctx context.Context, tx pgx.Tx) (map[string]*time.Time, error) {
+	var legacy bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'schema_migrations' AND column_name = 'name'
+	) AND NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = 'schema_migrations' AND column_name = 'version'
+	)`).Scan(&legacy); err != nil || !legacy {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT name, applied_at FROM schema_migrations`)
+	if err != nil {
+		return nil, err
+	}
+	dates := make(map[string]*time.Time)
+	for rows.Next() {
+		var name string
+		var appliedAt time.Time
+		if err := rows.Scan(&name, &appliedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		switch name {
+		case "00001_auth.up.sql":
+		case "00002_auth_tokens.up.sql":
+			name = "00008_auth_tokens.up.sql"
+		default:
+			rows.Close()
+			return nil, fmt.Errorf("unknown migration in legacy ledger: %s", name)
+		}
+		dates[name] = &appliedAt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DROP TABLE schema_migrations`); err != nil {
+		return nil, err
+	}
+	return dates, nil
 }
 
 func legacyAuthExists(ctx context.Context, tx pgx.Tx) (bool, error) {
