@@ -469,9 +469,10 @@ func loadLayout(ctx context.Context, tx pgx.Tx, eventID string) (layoutRevision,
 // publicLayoutFor adds availability and current prices. Only published and live events are visible.
 func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayout, error) {
 	var result publicLayout
-	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var status string
-		if err := tx.QueryRow(ctx, `SELECT status FROM events WHERE id = $1`, eventID).Scan(&status); err != nil {
+		var at time.Time
+		if err := tx.QueryRow(ctx, `SELECT status, transaction_timestamp() FROM events WHERE id = $1`, eventID).Scan(&status, &at); err != nil {
 			return err
 		}
 		if status != "published" && status != "live" {
@@ -481,9 +482,16 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		if err != nil {
 			return err
 		}
+		var slotID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM event_slots
+			WHERE event_id = $1 ORDER BY starts_at, id LIMIT 1`, eventID).Scan(&slotID); err != nil {
+			return err
+		}
 		taken := make(map[string]string)
 		rows, err := tx.Query(ctx, `SELECT a.stand_id::text, a.status FROM allocations a
-			WHERE a.event_id = $1 AND a.status IN ('hold', 'offer', 'reserved')`, eventID)
+			JOIN bookings b ON b.id = a.booking_id
+			WHERE a.event_id = $1 AND a.event_slot_id = $2 AND a.status IN ('hold', 'offer', 'reserved')
+			AND NOT (a.status IN ('hold', 'offer') AND b.status IN ('held', 'payment_pending') AND b.expires_at <= $3)`, eventID, slotID, at)
 		if err != nil {
 			return err
 		}
@@ -499,7 +507,7 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		prices, err := standPrices(ctx, tx, eventID, layout, taken)
+		prices, err := standPrices(ctx, tx, eventID, slotID, at, layout, taken)
 		if err != nil {
 			return err
 		}
@@ -524,15 +532,10 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 }
 
 // standPrices quotes each active stand with the active pricing rules for the whole-event slot.
-func standPrices(ctx context.Context, tx pgx.Tx, eventID string, layout layoutRevision, taken map[string]string) (map[string]*int64, error) {
+func standPrices(ctx context.Context, tx pgx.Tx, eventID, slotID string, at time.Time, layout layoutRevision, taken map[string]string) (map[string]*int64, error) {
 	prices := make(map[string]*int64, len(layout.Stands))
-	active, err := loadPriceVersion(ctx, tx, activePricingQuery, eventID, time.Now())
+	active, err := loadPriceVersion(ctx, tx, activePricingQuery, eventID, at)
 	if err != nil || active == nil {
-		return prices, err
-	}
-	var slotID string
-	err = tx.QueryRow(ctx, `SELECT id::text FROM event_slots WHERE event_id = $1 ORDER BY starts_at, id LIMIT 1`, eventID).Scan(&slotID)
-	if err != nil {
 		return prices, err
 	}
 	capacity, confirmed := int32(0), int32(0)
