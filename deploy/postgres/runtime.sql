@@ -48,7 +48,11 @@ GRANT SELECT ON public.business_categories, public.businesses, public.organizati
     public.consent_events, public.events, public.event_slots, public.event_status_history,
     public.event_pricing_versions, public.event_revisions, public.event_revision_bookings,
     public.organization_event_history TO :"api_role";
-GRANT SELECT (id, email, password_hash) ON public.users TO :"api_role";
+GRANT SELECT (id, email, password_hash, email_verified_at),
+    UPDATE (password_hash, email_verified_at) ON public.users TO :"api_role";
+GRANT SELECT (token_hash, user_id, purpose, expires_at, used_at, created_at),
+    INSERT (token_hash, user_id, purpose, expires_at), UPDATE (used_at)
+    ON public.auth_action_tokens TO :"api_role";
 GRANT SELECT (id, user_id, expires_at, revoked_at) ON public.sessions TO :"api_role";
 GRANT SELECT (token_hash, session_id, used_at) ON public.session_refresh_tokens TO :"api_role";
 GRANT SELECT (id, business_id, event_id, status, expires_at, created_at, refund_policy_version,

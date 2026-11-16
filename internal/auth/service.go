@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -27,6 +28,7 @@ type Service struct {
 	key       []byte
 	pepper    []byte
 	dummyHash []byte
+	mailer    Mailer
 }
 
 func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, error) {
@@ -42,6 +44,11 @@ func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, e
 		return nil, err
 	}
 	return &Service{store: store, key: []byte(key), pepper: []byte(pepper), dummyHash: dummyHash}, nil
+}
+
+// UseMailer configures account email delivery. Call before Routes.
+func (s *Service) UseMailer(m Mailer) {
+	s.mailer = m
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -93,7 +100,16 @@ func (s *Service) register(ctx context.Context, email, password string) (Account
 	if err != nil {
 		return Account{}, err
 	}
-	return s.store.createAccount(ctx, email, hash)
+	account, err := s.store.createAccount(ctx, email, hash)
+	if err != nil {
+		return Account{}, err
+	}
+	// Best effort: the account exists even if the first email cannot be issued;
+	// the user can request another one via resend-verification.
+	if err := s.sendActionEmail(ctx, account.ID, email, purposeEmailVerification); err != nil {
+		log.Printf("auth: could not issue verification token: %v", err)
+	}
+	return account, nil
 }
 
 func (s *Service) login(ctx context.Context, email, password string) (Account, tokens, error) {
@@ -108,7 +124,10 @@ func (s *Service) login(ctx context.Context, email, password string) (Account, t
 	}
 	refresh := refreshToken()
 	expires := time.Now().Add(sessionTTL)
-	id, err := s.store.createSession(ctx, account.ID, expires, s.hashRefresh(refresh))
+	id, err := s.store.createSession(ctx, account.ID, expires, hash, s.hashRefresh(refresh))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Account{}, tokens{}, errSession
+	}
 	if err != nil {
 		return Account{}, tokens{}, err
 	}

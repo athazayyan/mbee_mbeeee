@@ -109,6 +109,16 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if host := os.Getenv("SMTP_HOST"); host != "" {
+			mailer, err := auth.NewSMTPMailer(auth.SMTPConfig{
+				Host: host, Port: os.Getenv("SMTP_PORT"), User: os.Getenv("SMTP_USER"), Password: os.Getenv("SMTP_PASS"),
+				From: os.Getenv("MAIL_FROM"), AppOrigin: origin,
+			})
+			if err != nil {
+				return err
+			}
+			service.UseMailer(mailer)
+		}
 		service.Routes(api, origin)
 		profiles.Routes(api, service, origin)
 		eventStore.Routes(api, service, origin)
@@ -133,6 +143,10 @@ func run(ctx context.Context) error {
 		api.POST("/auth/login", unavailable)
 		api.POST("/auth/refresh", unavailable)
 		api.POST("/auth/logout", unavailable)
+		api.POST("/auth/forgot-password", unavailable)
+		api.POST("/auth/reset-password", unavailable)
+		api.POST("/auth/verify-email", unavailable)
+		api.POST("/auth/resend-verification", unavailable)
 		identity.Store{}.Routes(api, nil, "")
 		events.Store{}.Routes(api, nil, "")
 		booking.Store{}.Routes(api, nil)

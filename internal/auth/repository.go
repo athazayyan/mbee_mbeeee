@@ -42,14 +42,16 @@ func (r repository) credentials(ctx context.Context, email string) (Account, []b
 	return account, hash, err
 }
 
-func (r repository) createSession(ctx context.Context, userID string, expires time.Time, hash []byte) (string, error) {
+func (r repository) createSession(ctx context.Context, userID string, expires time.Time, passwordHash, refreshHash []byte) (string, error) {
 	var id string
 	err := r.db.QueryRow(ctx, `
 		WITH created AS (
-			INSERT INTO sessions (user_id, expires_at) VALUES ($1, $2) RETURNING id
+			INSERT INTO sessions (user_id, expires_at)
+			SELECT id, $2 FROM users WHERE id = $1 AND password_hash = $3 FOR SHARE
+			RETURNING id
 		)
 		INSERT INTO session_refresh_tokens (session_id, token_hash)
-		SELECT id, $3 FROM created RETURNING session_id`, userID, expires, hash).Scan(&id)
+		SELECT id, $4 FROM created RETURNING session_id`, userID, expires, passwordHash, refreshHash).Scan(&id)
 	return id, err
 }
 
@@ -115,7 +117,8 @@ func (r repository) check(ctx context.Context) error {
 	err := r.db.QueryRow(ctx, `
 		SELECT to_regclass('users') IS NOT NULL
 		AND to_regclass('sessions') IS NOT NULL
-		AND to_regclass('session_refresh_tokens') IS NOT NULL`).Scan(&tablesPresent)
+		AND to_regclass('session_refresh_tokens') IS NOT NULL
+		AND to_regclass('auth_action_tokens') IS NOT NULL`).Scan(&tablesPresent)
 	if err != nil {
 		return err
 	}

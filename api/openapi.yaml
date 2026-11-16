@@ -219,9 +219,10 @@ paths:
     post:
       tags: [Akun dan sesi]
       operationId: requestPasswordReset
-      summary: '[Rencana] Minta reset kata sandi'
-      description: Terima request tanpa membedakan apakah email terdaftar.
-      x-implementation-status: planned
+      summary: Minta tautan reset kata sandi
+      description: Selalu 202 untuk email yang valid, terdaftar atau tidak. Tautan berlaku 30 menit dan sekali pakai; permintaan
+        baru menggantikan tautan lama. Permintaan berulang untuk akun yang sama dalam 1 menit tidak mengirim email baru.
+      x-implementation-status: implemented
       security: []
       requestBody:
         required: true
@@ -230,7 +231,12 @@ paths:
             schema: {$ref: '#/components/schemas/ForgotPasswordInput'}
       responses:
         '202':
-          description: Berhasil tanpa isi respons
+          description: Permintaan diterima tanpa isi respons
+        '403':
+          description: Origin browser berbeda dari APP_ORIGIN
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '422':
           description: Isi request gagal divalidasi
           content:
@@ -238,6 +244,11 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '429':
           description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Layanan akun belum tersedia
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -246,9 +257,10 @@ paths:
     post:
       tags: [Akun dan sesi]
       operationId: resetPassword
-      summary: '[Rencana] Atur ulang kata sandi'
-      description: Token sekali pakai dan memiliki masa berlaku.
-      x-implementation-status: planned
+      summary: Atur ulang kata sandi dengan token
+      description: Token sekali pakai dan berlaku 30 menit. Setelah berhasil, semua sesi akun dicabut dan cookie dihapus; pengguna
+        harus masuk kembali. Token tidak valid, kedaluwarsa, atau sudah dipakai menghasilkan 422 INVALID_TOKEN.
+      x-implementation-status: implemented
       security: []
       requestBody:
         required: true
@@ -257,7 +269,12 @@ paths:
             schema: {$ref: '#/components/schemas/ResetPasswordInput'}
       responses:
         '204':
-          description: Berhasil tanpa isi respons
+          description: Kata sandi diganti dan semua sesi dicabut
+        '403':
+          description: Origin browser berbeda dari APP_ORIGIN
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '422':
           description: Isi request gagal divalidasi
           content:
@@ -265,6 +282,87 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '429':
           description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Layanan akun belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/verify-email:
+    post:
+      tags: [Akun dan sesi]
+      operationId: verifyEmail
+      summary: Verifikasi email dengan token
+      description: Token sekali pakai dan berlaku 24 jam. Token tidak valid, kedaluwarsa, atau sudah dipakai menghasilkan 422
+        INVALID_TOKEN. Tidak memerlukan sesi.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VerifyEmailInput'}
+      responses:
+        '204':
+          description: Email terverifikasi
+        '403':
+          description: Origin browser berbeda dari APP_ORIGIN
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Layanan akun belum tersedia
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/resend-verification:
+    post:
+      tags: [Akun dan sesi]
+      operationId: resendEmailVerification
+      summary: Kirim ulang email verifikasi
+      description: Selalu 202 untuk email yang valid, terdaftar atau tidak, sudah terverifikasi atau belum. Tautan lama diganti.
+        Permintaan berulang dalam 1 menit tidak mengirim email baru.
+      x-implementation-status: implemented
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ForgotPasswordInput'}
+      responses:
+        '202':
+          description: Permintaan diterima tanpa isi respons
+        '403':
+          description: Origin browser berbeda dari APP_ORIGIN
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Batas percobaan terlampaui
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '503':
+          description: Layanan akun belum tersedia
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -3925,6 +4023,11 @@ components:
       properties:
         token: {type: string, minLength: 1}
         password: {type: string, format: password, minLength: 12}
+    VerifyEmailInput:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string, minLength: 1}
     AccountProfileResponse:
       type: object
       required: [data, meta]

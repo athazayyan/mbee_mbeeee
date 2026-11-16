@@ -32,6 +32,10 @@ func (s *Service) Routes(api *gin.RouterGroup, origin string) {
 	group.POST("/login", h.login)
 	group.POST("/refresh", h.refresh)
 	group.POST("/logout", h.logout)
+	group.POST("/forgot-password", h.forgotPassword)
+	group.POST("/reset-password", h.resetPassword)
+	group.POST("/verify-email", h.verifyEmail)
+	group.POST("/resend-verification", h.resendVerification)
 }
 
 // Separate minute windows and cap the number of peers tracked per process.
@@ -195,4 +199,131 @@ func sendError(c *gin.Context, err error) {
 		httpapi.LogInternalError(c, "auth request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan. Coba lagi nanti.", nil)
 	}
+}
+
+type emailPayload struct {
+	Email string `json:"email"`
+}
+
+type resetPasswordPayload struct {
+	Token    string `json:"token"`
+	Password string `json:"password"`
+}
+
+type verifyEmailPayload struct {
+	Token string `json:"token"`
+}
+
+func readEmailPayload(c *gin.Context) (string, bool) {
+	var input emailPayload
+	body := http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Payload tidak valid.", nil)
+		return "", false
+	}
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 254 {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa alamat email.", map[string]string{
+			"email": "Masukkan alamat email yang valid.",
+		})
+		return "", false
+	}
+	return email, true
+}
+
+func (h handler) forgotPassword(c *gin.Context) {
+	email, ok := readEmailPayload(c)
+	if !ok {
+		return
+	}
+	if err := h.service.forgotPassword(c.Request.Context(), email); err != nil {
+		sendError(c, err)
+		return
+	}
+	c.Status(http.StatusAccepted)
+}
+
+func (h handler) resetPassword(c *gin.Context) {
+	var input resetPasswordPayload
+	body := http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Payload tidak valid.", nil)
+		return
+	}
+
+	token := strings.TrimSpace(input.Token)
+	fields := make(map[string]string)
+	if token == "" {
+		fields["token"] = "Token wajib diisi."
+	}
+	if utf8.RuneCountInString(input.Password) < 12 || len(input.Password) > 72 {
+		fields["password"] = "Gunakan minimal 12 karakter dan maksimal 72 byte."
+	}
+	if len(fields) != 0 {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa token dan kata sandi.", fields)
+		return
+	}
+
+	if err := h.service.resetPassword(c.Request.Context(), token, input.Password); err != nil {
+		if errors.Is(err, ErrInvalidOrExpiredToken) {
+			httpapi.Error(c, http.StatusUnprocessableEntity, "INVALID_TOKEN", "Token tidak valid atau sudah kedaluwarsa.", map[string]string{
+				"token": "Token tidak valid atau sudah kedaluwarsa.",
+			})
+			return
+		}
+		sendError(c, err)
+		return
+	}
+
+	h.clearSession(c)
+	c.Status(http.StatusNoContent)
+}
+
+func (h handler) verifyEmail(c *gin.Context) {
+	var input verifyEmailPayload
+	body := http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	decoder := json.NewDecoder(body)
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Payload tidak valid.", nil)
+		return
+	}
+
+	token := strings.TrimSpace(input.Token)
+	if token == "" {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Token wajib diisi.", map[string]string{
+			"token": "Token wajib diisi.",
+		})
+		return
+	}
+
+	if err := h.service.verifyEmail(c.Request.Context(), token); err != nil {
+		if errors.Is(err, ErrInvalidOrExpiredToken) {
+			httpapi.Error(c, http.StatusUnprocessableEntity, "INVALID_TOKEN", "Token verifikasi tidak valid atau sudah kedaluwarsa.", map[string]string{
+				"token": "Token tidak valid atau sudah kedaluwarsa.",
+			})
+			return
+		}
+		sendError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h handler) resendVerification(c *gin.Context) {
+	email, ok := readEmailPayload(c)
+	if !ok {
+		return
+	}
+	if err := h.service.resendVerification(c.Request.Context(), email); err != nil {
+		sendError(c, err)
+		return
+	}
+	c.Status(http.StatusAccepted)
 }
