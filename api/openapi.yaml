@@ -4216,6 +4216,17 @@ components:
         min_rent: {$ref: '#/components/schemas/Rupiah'}
         max_rent: {$ref: '#/components/schemas/Rupiah'}
         capacity: {type: integer, minimum: 0, description: Jumlah stand aktif di denah; tidak ada bila acara belum punya denah.}
+        slots:
+          type: array
+          description: Hanya pada GET /events/{id}. Tenant memilih slot sebelum meminta hold.
+          items:
+            type: object
+            required: [id, code, starts_at, ends_at]
+            properties:
+              id: {type: string, format: uuid}
+              code: {type: string, minLength: 1}
+              starts_at: {type: string, format: date-time}
+              ends_at: {type: string, format: date-time}
     EventCreate:
       type: object
       additionalProperties: false
