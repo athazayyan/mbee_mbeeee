@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -51,6 +52,14 @@ func main() {
 }
 
 func run(ctx context.Context) error {
+	var maxActiveHolds int
+	if raw := os.Getenv("BOOKING_MAX_ACTIVE_HOLDS"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit <= 0 {
+			return errors.New("BOOKING_MAX_ACTIVE_HOLDS must be a positive integer or empty")
+		}
+		maxActiveHolds = limit
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -72,6 +81,7 @@ func run(ctx context.Context) error {
 	api := router.Group("/api/v1", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 	})
+	holdEnabled := false
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
 		origin, err := appOrigin(os.Getenv("APP_ORIGIN"))
 		if err != nil {
@@ -102,6 +112,11 @@ func run(ctx context.Context) error {
 			if err := bookings.Ready(probe); err != nil {
 				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
 			}
+			if maxActiveHolds > 0 {
+				if _, err := pool.Exec(probe, "SELECT version FROM hold_policy_versions LIMIT 0"); err != nil {
+					return fmt.Errorf("hold policy store unavailable; check migrations and booking grants: %w", err)
+				}
+			}
 			return nil
 		}
 		err = checkSchema(startup)
@@ -126,6 +141,14 @@ func run(ctx context.Context) error {
 			return err
 		}
 		bookings.Routes(api, service)
+		if maxActiveHolds > 0 {
+			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
+			settings := booking.HoldSettings{Lifetime: 15 * time.Minute, MaxActive: maxActiveHolds}
+			if err := bookings.HoldRoutes(api, service, origin, settings, source); err != nil {
+				return err
+			}
+			holdEnabled = true
+		}
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
@@ -155,6 +178,13 @@ func run(ctx context.Context) error {
 		api.POST("/events/:id/publish", unavailable)
 		events.Store{}.Routes(api, nil, "")
 		booking.Store{}.Routes(api, nil)
+	}
+	if !holdEnabled {
+		unavailable := func(c *gin.Context) {
+			httpapi.Error(c, http.StatusServiceUnavailable, "HOLD_UNAVAILABLE", "Layanan hold belum tersedia.", nil)
+		}
+		api.POST("/bookings/hold-quote", unavailable)
+		api.POST("/bookings/holds", unavailable)
 	}
 
 	server := &http.Server{

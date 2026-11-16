@@ -75,7 +75,7 @@ Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `a
 
 Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
 
-Saat rilis mendaftarkan endpoint hold dengan sumber stand dan kebijakan yang aktif, tambahkan `-v booking_hold=true` pada perintah `psql` di atas. Parameter ini memberi role API izin menyimpan booking, alokasi, dan histori serta memproses expiry. Untuk rilis tanpa endpoint hold, jalankan kembali skrip dengan nilai bawaan `false` untuk mencabut grant tambahan tersebut.
+Untuk mengaktifkan quote dan hold 15 menit, terapkan migration, tambahkan versi kebijakan yang disetujui ke `hold_policy_versions` melalui role pemilik database, lalu jalankan skrip role dengan `-v booking_hold=true`. Set `BOOKING_MAX_ACTIVE_HOLDS` ke batas hold aktif per akun yang disetujui. API menggunakan versi kebijakan terbaru yang sudah berlaku, dan mengembalikan 503 bila belum ada versi. Kosongkan batas dan jalankan skrip role dengan nilai bawaan `false` untuk menonaktifkan quote/hold dan mencabut grant tambahan.
 
 ## Verifikasi lokal
 

@@ -1732,9 +1732,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: quoteHold
-      summary: '[Rencana] Tinjau biaya dan syarat hold'
-      description: Pemilik usaha memeriksa stand pada satu slot. Respons memuat harga, syarat acara dan ketentuan refund. Simulasi ini tidak mengalokasikan stand.
-      x-implementation-status: planned
+      summary: Tinjau biaya dan syarat hold
+      description: Pemilik usaha memeriksa stand pada satu slot. Respons memuat harga, syarat acara dan ketentuan refund tanpa mengalokasikan stand. Layanan membutuhkan BOOKING_MAX_ACTIVE_HOLDS dan kebijakan yang berlaku.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       requestBody:
@@ -1764,9 +1764,9 @@ paths:
     post:
       tags: [Kurasi dan booking]
       operationId: createHold
-      summary: '[Rencana] Buat hold stand'
+      summary: Buat hold stand
       description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan jika expected_price diisi, seluruh komponen harga diverifikasi ulang. Percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
