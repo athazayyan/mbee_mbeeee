@@ -111,7 +111,7 @@ func expireHolds(ctx context.Context, executor expiryExecutor, eventID *string, 
 		WITH due AS (
 			SELECT b.id, b.status FROM bookings b
 			JOIN allocations a ON a.booking_id = b.id AND a.status IN ('hold', 'offer')
-			WHERE b.status IN ('held', 'payment_pending') AND b.expires_at <= clock_timestamp()
+			WHERE b.status IN ('held', 'payment_pending') AND b.expires_at <= statement_timestamp()
 				AND ($1::uuid IS NULL OR b.event_id = $1)
 			ORDER BY b.expires_at, b.id LIMIT $2 FOR UPDATE OF b SKIP LOCKED
 		), released AS (

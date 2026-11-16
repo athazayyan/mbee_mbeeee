@@ -35,6 +35,12 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "worker" {
+		if err := runWorker(ctx, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	if err := run(ctx); err != nil {
 		log.Fatal(err)
