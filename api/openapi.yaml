@@ -3642,12 +3642,44 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
   /businesses/{id}/reports:
+    get:
+      tags: [Rapor usaha]
+      operationId: listBusinessReports
+      summary: Daftar rapor usaha
+      description: Pemilik usaha. 50 rapor terbaru tanpa isi snapshot.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BusinessReport'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '404':
+          description: Usaha tidak ditemukan atau bukan milik pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
     post:
       tags: [Rapor usaha]
       operationId: requestBusinessReport
-      summary: '[Rencana] Jadwalkan pembuatan rapor'
-      description: Pemilik usaha. Rapor memakai snapshot periode dan cutoff server.
-      x-implementation-status: planned
+      summary: Buat rapor usaha
+      description: Pemilik usaha. Rapor memakai snapshot periode dan cutoff server; data yang tersinkron belakangan
+        tidak mengubah rapor lama. Saat ini snapshot dibuat langsung sehingga job sudah succeeded saat 202 dikembalikan.
+        Periode paling panjang satu tahun; timezone (IANA, default Asia/Jakarta) menentukan pengelompokan harian.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -3701,9 +3733,9 @@ paths:
     get:
       tags: [Rapor usaha]
       operationId: getJob
-      summary: '[Rencana] Baca status job'
-      description: Pemilik job; output tersedia bila job sukses.
-      x-implementation-status: planned
+      summary: Baca status job rapor
+      description: Pemilik usaha. job_id sama dengan report_id.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -3738,13 +3770,76 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /reports/{id}:
+    get:
+      tags: [Rapor usaha]
+      operationId: getBusinessReport
+      summary: Baca rapor lengkap
+      description: Pemilik usaha. Memuat snapshot lengkap sesuai definisi PRD 11.3; laba hanya diisi bila HPP lengkap.
+        Selalu no-store.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/BusinessReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '404':
+          description: Rapor tidak ditemukan atau bukan milik pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /reports/{id}/shares:
+    get:
+      tags: [Rapor usaha]
+      operationId: listReportShares
+      summary: Daftar tautan berbagi rapor
+      description: Pemilik rapor. URL tidak ditampilkan lagi karena token hanya disimpan sebagai hash.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ReportShare'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '404':
+          description: Rapor tidak ditemukan atau bukan milik pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
     post:
       tags: [Rapor usaha]
       operationId: createReportShare
-      summary: '[Rencana] Buat tautan berbagi rapor'
-      description: Pemilik rapor. Tautan memberikan akses berbatas waktu kepada pemegang token.
-      x-implementation-status: planned
+      summary: Buat tautan berbagi rapor
+      description: Pemilik rapor. Token acak 32 byte hanya muncul sekali di url dan disimpan sebagai hash. Masa berlaku
+        default 7 hari, antara 1 jam dan 30 hari. Siapa pun pemegang tautan dapat membaca ringkasan rapor.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -3793,9 +3888,9 @@ paths:
     delete:
       tags: [Rapor usaha]
       operationId: revokeReportShare
-      summary: '[Rencana] Cabut tautan rapor'
+      summary: Cabut tautan rapor
       description: Pemilik rapor. Token tidak lagi berlaku setelah dicabut.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -3826,9 +3921,10 @@ paths:
     get:
       tags: [Rapor usaha]
       operationId: getSharedReport
-      summary: '[Rencana] Baca rapor berbagi'
-      description: Pemegang token masih berlaku. Token kedaluwarsa atau dicabut memberi 404.
-      x-implementation-status: planned
+      summary: Baca rapor berbagi
+      description: Pemegang token masih berlaku. Token kedaluwarsa atau dicabut memberi 404. Hanya ringkasan (tanpa laba,
+        HPP, atau produk). Setiap pembacaan menambah view_count tautan.
+      x-implementation-status: implemented
       security: []
       parameters:
       - name: token
@@ -5692,18 +5788,99 @@ components:
         error_code: {type: string, minLength: 1}
     BusinessReportInput:
       type: object
+      additionalProperties: false
       required: [period_start, period_end]
       properties:
         period_start: {type: string, format: date-time}
         period_end: {type: string, format: date-time}
         event_id: {type: string, format: uuid}
-    ReportShare:
+        timezone: {type: string, description: Zona waktu IANA untuk pengelompokan harian. Default Asia/Jakarta.}
+    BusinessReport:
       type: object
-      required: [id, url, expires_at]
+      required: [id, business_id, period_start, period_end, timezone, status, verification_code, created_at]
       properties:
         id: {type: string, format: uuid}
-        url: {type: string, format: uri}
+        business_id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        timezone: {type: string}
+        status: {type: string, enum: [queued, running, succeeded, failed]}
+        verification_code: {type: string, description: Kode yang dicetak di rapor untuk dicocokkan.}
+        created_at: {type: string, format: date-time}
+        net_sales: {$ref: '#/components/schemas/Rupiah'}
+        snapshot: {$ref: '#/components/schemas/ReportSnapshot'}
+    ReportSnapshot:
+      type: object
+      required: [business_name, period_start, period_end, timezone, generated_at, cutoff_at, source, verification_status,
+        verification_label, gross_sales, discounts, refunds, net_sales, transaction_count, voided_transactions,
+        return_transactions, units_sold, units_net, cost_complete, expenses, cash_sales, non_cash_sales, daily,
+        top_products, completeness]
+      properties:
+        business_name: {type: string}
+        event_name: {type: string}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        timezone: {type: string}
+        generated_at: {type: string, format: date-time}
+        cutoff_at: {type: string, format: date-time}
+        source: {type: string}
+        verification_status: {type: string, enum: [third_party_unverified]}
+        verification_label: {type: string}
+        gross_sales: {type: integer}
+        discounts: {type: integer}
+        refunds: {type: integer}
+        net_sales: {type: integer}
+        transaction_count: {type: integer}
+        voided_transactions: {type: integer}
+        return_transactions: {type: integer}
+        units_sold: {type: integer}
+        units_net: {type: integer}
+        average_transaction: {type: integer}
+        cost_complete: {type: boolean}
+        cost_of_goods: {type: integer}
+        gross_profit: {type: integer}
+        expenses: {type: integer}
+        operating_profit: {type: integer}
+        cash_sales: {type: integer}
+        non_cash_sales: {type: integer}
+        daily: {type: array, items: {$ref: '#/components/schemas/ReportDay'}}
+        top_products:
+          type: array
+          items:
+            type: object
+            required: [name, units, net_sales]
+            properties:
+              name: {type: string}
+              units: {type: integer}
+              net_sales: {type: integer}
+        completeness:
+          type: object
+          required: [devices, note]
+          properties:
+            devices: {type: integer}
+            last_synced_at: {type: string, format: date-time}
+            note: {type: string}
+    ReportDay:
+      type: object
+      required: [date, net_sales, transactions]
+      properties:
+        date: {type: string, format: date}
+        net_sales: {type: integer}
+        transactions: {type: integer}
+    ReportShare:
+      type: object
+      required: [id, scope, expires_at, created_at, view_count, active]
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, format: uri, description: Hanya ada pada respons pembuatan.}
+        scope: {type: string, enum: [summary]}
         expires_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        view_count: {type: integer}
+        last_viewed_at: {type: string, format: date-time}
+        active: {type: boolean}
     ReportShareInput:
       type: object
       properties:
@@ -5711,15 +5888,26 @@ components:
         scope: {type: string, enum: [summary]}
     PublicReport:
       type: object
-      required: [period_start, period_end, generated_at, verification_status]
+      required: [business_name, period_start, period_end, timezone, generated_at, verification_status, verification_label,
+        verification_code, source, net_sales, transaction_count, units_net, daily, completeness_note, expires_at]
       properties:
+        business_name: {type: string}
+        event_name: {type: string}
         period_start: {type: string, format: date-time}
         period_end: {type: string, format: date-time}
+        timezone: {type: string}
         generated_at: {type: string, format: date-time}
         verification_status: {type: string, enum: [third_party_unverified]}
-        net_sales: {$ref: '#/components/schemas/Rupiah'}
+        verification_label: {type: string}
+        verification_code: {type: string}
+        source: {type: string}
+        net_sales: {type: integer}
         transaction_count: {type: integer, minimum: 0}
+        units_net: {type: integer}
+        average_transaction: {type: integer}
+        daily: {type: array, items: {$ref: '#/components/schemas/ReportDay'}}
         completeness_note: {type: string, minLength: 1}
+        expires_at: {type: string, format: date-time}
     Message:
       type: object
       required: [id, client_message_id, sender_id, text, created_at]
