@@ -93,6 +93,7 @@ GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.e
 GRANT INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
+GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";
