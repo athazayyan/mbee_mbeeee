@@ -1,7 +1,6 @@
 package events
 
 import (
-	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -87,7 +86,7 @@ func (s Store) listEvents(c *gin.Context, account auth.Account) {
 		writeError(c, fieldErrors{"limit": "Gunakan limit antara 1 dan 100."})
 		return
 	}
-	before, beforeID, err := decodeCursor(c.Query("cursor"))
+	before, beforeID, err := httpapi.DecodeCursor(c.Query("cursor"))
 	if err != nil {
 		writeError(c, fieldErrors{"cursor": "Gunakan cursor dari halaman sebelumnya."})
 		return
@@ -101,29 +100,10 @@ func (s Store) listEvents(c *gin.Context, account auth.Account) {
 	if len(data) > limit {
 		data = data[:limit]
 		last := data[len(data)-1]
-		cursor := base64.RawURLEncoding.EncodeToString([]byte(last.StartsAt.Format(time.RFC3339Nano) + "/" + last.ID))
+		cursor := httpapi.EncodeCursor(last.StartsAt, last.ID)
 		next = &cursor
 	}
 	c.JSON(http.StatusOK, gin.H{"data": data, "meta": gin.H{"next_cursor": next}})
-}
-
-func decodeCursor(cursor string) (time.Time, string, error) {
-	if cursor == "" {
-		return time.Time{}, "", nil
-	}
-	if len(cursor) > 120 {
-		return time.Time{}, "", errors.New("cursor is too long")
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(cursor)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	date, id, ok := strings.Cut(string(raw), "/")
-	if !ok || !httpapi.ValidID(id) {
-		return time.Time{}, "", errors.New("invalid cursor ID")
-	}
-	before, err := time.Parse(time.RFC3339Nano, date)
-	return before, id, err
 }
 
 func (s Store) getEvent(c *gin.Context, account auth.Account) {

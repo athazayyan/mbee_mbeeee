@@ -27,6 +27,7 @@ type Booking struct {
 	ID            string    `json:"booking_id"`
 	BusinessID    string    `json:"business_id"`
 	EventID       string    `json:"event_id"`
+	EventName     string    `json:"event_name"`
 	StandID       string    `json:"stand_id"`
 	SlotID        string    `json:"event_slot_id"`
 	Status        string    `json:"status"`
@@ -34,13 +35,14 @@ type Booking struct {
 	CreatedAt     time.Time `json:"created_at"`
 	PolicyVersion string    `json:"accepted_policy_version"`
 	Price         Price     `json:"price"`
+	ServerNow     time.Time `json:"-"`
 }
 
-const bookingColumns = `b.id, b.business_id, b.event_id, a.stand_id, a.event_slot_id,
+const bookingColumns = `b.id, b.business_id, b.event_id, e.name, a.stand_id, a.event_slot_id,
 	CASE WHEN b.status IN ('held', 'payment_pending') AND b.expires_at <= transaction_timestamp()
 		THEN 'expired' ELSE b.status END,
 	b.expires_at, b.created_at, b.refund_policy_version, b.rent, b.platform_fee, b.provider_fee,
-	b.total, b.price_revision::text`
+	b.total, b.price_revision::text, transaction_timestamp()`
 
 func (s Store) Ready(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `SELECT 1 FROM bookings, allocations, booking_status_history LIMIT 0`)
@@ -58,17 +60,19 @@ func (s Store) detail(ctx context.Context, actor, id string) (Booking, error) {
 	return scanBooking(row)
 }
 
-func (s Store) list(ctx context.Context, actor, businessID string, before time.Time, beforeID *string, limit int) ([]Booking, error) {
+func (s Store) list(ctx context.Context, actor, businessID string, before time.Time, beforeID *string, limit int) ([]Booking, time.Time, error) {
 	bookings := make([]Booking, 0)
+	var serverNow time.Time
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{
 		IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly,
 	}, func(tx pgx.Tx) error {
 		var business string
-		if err := tx.QueryRow(ctx, `SELECT business_id FROM memberships WHERE user_id = $1 AND business_id = $2 AND role = 'owner'`,
-			actor, businessID).Scan(&business); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT business_id, transaction_timestamp() FROM memberships
+			WHERE user_id = $1 AND business_id = $2 AND role = 'owner'`, actor, businessID).Scan(&business, &serverNow); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT `+bookingColumns+` FROM bookings b JOIN allocations a ON a.booking_id = b.id
+		rows, err := tx.Query(ctx, `SELECT `+bookingColumns+` FROM bookings b
+			JOIN allocations a ON a.booking_id = b.id JOIN events e ON e.id = b.event_id
 			WHERE b.business_id = $1 AND ($2::uuid IS NULL OR (b.created_at, b.id) < ($3, $2))
 			ORDER BY b.created_at DESC, b.id DESC LIMIT $4`, business, beforeID, before, limit)
 		if err != nil {
@@ -79,15 +83,15 @@ func (s Store) list(ctx context.Context, actor, businessID string, before time.T
 		})
 		return err
 	})
-	return bookings, err
+	return bookings, serverNow, err
 }
 
 func scanBooking(row pgx.Row) (Booking, error) {
 	var result Booking
 	result.Price.Currency = "IDR"
-	err := row.Scan(&result.ID, &result.BusinessID, &result.EventID, &result.StandID, &result.SlotID, &result.Status,
+	err := row.Scan(&result.ID, &result.BusinessID, &result.EventID, &result.EventName, &result.StandID, &result.SlotID, &result.Status,
 		&result.ExpiresAt, &result.CreatedAt, &result.PolicyVersion, &result.Price.Rent, &result.Price.PlatformFee,
-		&result.Price.ProviderFee, &result.Price.Total, &result.Price.Version)
+		&result.Price.ProviderFee, &result.Price.Total, &result.Price.Version, &result.ServerNow)
 	return result, err
 }
 

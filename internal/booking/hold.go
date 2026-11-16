@@ -107,7 +107,7 @@ func (s Store) CreateHold(ctx context.Context, actor, key string, input HoldInpu
 				return ErrIdempotencyMismatch
 			}
 			result, err = scanBooking(tx.QueryRow(ctx, `SELECT `+bookingColumns+` FROM bookings b
-				JOIN allocations a ON a.booking_id = b.id WHERE b.id = $1`, priorID))
+				JOIN allocations a ON a.booking_id = b.id JOIN events e ON e.id = b.event_id WHERE b.id = $1`, priorID))
 			return err
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -215,5 +215,5 @@ func insertHold(ctx context.Context, tx pgx.Tx, actor, key string, digest []byte
 		return Booking{}, err
 	}
 	return scanBooking(tx.QueryRow(ctx, `SELECT `+bookingColumns+` FROM bookings b
-		JOIN allocations a ON a.booking_id = b.id WHERE b.id = $1`, id))
+		JOIN allocations a ON a.booking_id = b.id JOIN events e ON e.id = b.event_id WHERE b.id = $1`, id))
 }

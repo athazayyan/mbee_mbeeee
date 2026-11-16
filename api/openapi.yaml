@@ -1395,6 +1395,40 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings:
+    get:
+      tags: [Kurasi dan booking]
+      operationId: listBookings
+      summary: Daftar booking usaha
+      description: Hanya pemilik usaha. Urutan dari waktu pembuatan terbaru dengan pagination cursor.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: business_id
+        in: query
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Booking usaha dan waktu server
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BookingDetail'}}
+                  meta:
+                    allOf:
+                    - {$ref: '#/components/schemas/CursorMeta'}
+                    - {$ref: '#/components/schemas/ServerTime'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/holds:
     post:
       tags: [Kurasi dan booking]
@@ -1481,9 +1515,9 @@ paths:
     get:
       tags: [Kurasi dan booking]
       operationId: getBooking
-      summary: '[Rencana] Baca status booking'
-      description: Pihak berhak dapat membaca status dan snapshot.
-      x-implementation-status: planned
+      summary: Baca status booking
+      description: Pemilik usaha atau pemilik organisasi acara dapat membaca status, komponen harga, dan waktu server.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1500,8 +1534,8 @@ paths:
                 type: object
                 required: [data, meta]
                 properties:
-                  data: {$ref: '#/components/schemas/Booking'}
-                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+                  data: {$ref: '#/components/schemas/BookingDetail'}
+                  meta: {$ref: '#/components/schemas/ServerTime'}
         '401':
           description: Sesi pengguna atau tanda tangan provider tidak valid
           content:
@@ -4056,6 +4090,24 @@ components:
         expires_at: {type: string, format: date-time}
         price: {$ref: '#/components/schemas/BookingPrice'}
         accepted_policy_version: {type: string, minLength: 1}
+    BookingDetail:
+      allOf:
+      - {$ref: '#/components/schemas/Booking'}
+      - type: object
+        required: [business_id, event_id, stand_id, event_slot_id, event_name, created_at, accepted_policy_version]
+        properties:
+          business_id: {type: string, format: uuid}
+          event_id: {type: string, format: uuid}
+          stand_id: {type: string, format: uuid}
+          event_slot_id: {type: string, format: uuid}
+          event_name: {type: string, minLength: 1}
+          created_at: {type: string, format: date-time}
+          accepted_policy_version: {type: string, minLength: 1}
+    ServerTime:
+      type: object
+      required: [server_now]
+      properties:
+        server_now: {type: string, format: date-time}
     HoldInput:
       type: object
       required: [business_id, event_id, stand_id, event_slot_id, accepted_policy_version]

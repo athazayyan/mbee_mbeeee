@@ -16,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 	apidocs "kitakarsa.com/tenantku/backend/api"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/booking"
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
@@ -80,12 +81,16 @@ func run(ctx context.Context) error {
 		}
 		profiles := identity.Store{DB: pool}
 		eventStore := events.Store{DB: pool}
+		bookings := booking.Store{DB: pool}
 		checkSchema := func(probe context.Context) error {
 			if err := profiles.Ready(probe); err != nil {
 				return fmt.Errorf("identity schema unavailable; run make migrate: %w", err)
 			}
 			if err := eventStore.Ready(probe); err != nil {
 				return fmt.Errorf("event schema unavailable; run make migrate: %w", err)
+			}
+			if err := bookings.Ready(probe); err != nil {
+				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
 			}
 			return nil
 		}
@@ -97,6 +102,7 @@ func run(ctx context.Context) error {
 		service.Routes(api, origin)
 		profiles.Routes(api, service, origin)
 		eventStore.Routes(api, service, origin)
+		bookings.Routes(api, service)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
@@ -119,6 +125,7 @@ func run(ctx context.Context) error {
 		api.POST("/auth/logout", unavailable)
 		identity.Store{}.Routes(api, nil, "")
 		events.Store{}.Routes(api, nil, "")
+		booking.Store{}.Routes(api, nil)
 	}
 
 	server := &http.Server{
