@@ -88,7 +88,7 @@ func (s Store) cancelEvent(c *gin.Context, account auth.Account) {
 		return
 	case errors.Is(err, errCancellationNeedsBookingWorkflow):
 		httpapi.Error(c, http.StatusConflict, "EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW",
-			"Acara memiliki riwayat booking. Pembatalan perlu penanganan booking dan refund.", nil)
+			"Ada booking yang memerlukan penanganan pembayaran atau alokasi sebelum acara bisa dibatalkan.", nil)
 		return
 	case errors.Is(err, errEventNotCancellable):
 		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_CANCELLABLE", "Status acara tidak mengizinkan pembatalan.", nil)
@@ -121,16 +121,7 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 			}
 			cancelled = previous
 			return nil
-		case "draft":
-		case "published", "live":
-			// Hold creation acquires the same event row lock before inserting bookings.
-			var hasBookings bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bookings WHERE event_id = $1)`, id).Scan(&hasBookings); err != nil {
-				return err
-			}
-			if hasBookings {
-				return errCancellationNeedsBookingWorkflow
-			}
+		case "draft", "published", "live":
 		default:
 			return errEventNotCancellable
 		}
@@ -139,6 +130,21 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 			WHERE e.id = $1 RETURNING `+eventColumns, id))
 		if err != nil {
 			return err
+		}
+		// Hold creation takes the same event lock. Any failure here rolls back
+		// the event status as well as booking and allocation changes.
+		var hasBookings bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bookings WHERE event_id = $1)`, id).Scan(&hasBookings); err != nil {
+			return err
+		}
+		if hasBookings {
+			var closed bool
+			if err := tx.QueryRow(ctx, `SELECT public.cancel_unpaid_event_bookings($1, $2)`, id, actor).Scan(&closed); err != nil {
+				return err
+			}
+			if !closed {
+				return errCancellationNeedsBookingWorkflow
+			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO event_status_history
 			(event_id, actor_id, from_status, to_status, reason)
