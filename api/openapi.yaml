@@ -1201,6 +1201,38 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/revisions/{revision_id}/apply:
+    post:
+      tags: [Acara dan katalog]
+      operationId: applyEventRevision
+      summary: Terapkan usulan revisi yang disetujui tenant
+      description: Pemilik organisasi menerapkan usulan yang masih sesuai dengan acara. Semua booking aktif harus memiliki persetujuan untuk usulan ini. Transaksi memperbarui acara dan slot, mencatat penerapan, serta menutup usulan lama. Pengiriman ulang mengembalikan kondisi acara saat ini.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {$ref: '#/components/parameters/IdentityResourceID'}
+      - name: revision_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Acara setelah penerapan revisi
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ManagedEvent'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/cancel:
     post:
       tags: [Acara dan katalog]
@@ -4390,7 +4422,7 @@ components:
         terms: {type: string}
     EventRevision:
       type: object
-      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, approved_bookings, declined_bookings, created_at]
+      required: [id, event_id, revision, requested_by, reason, before, after, affected_bookings, approved_bookings, declined_bookings, created_at, status, can_apply, applied_at]
       properties:
         id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
@@ -4403,9 +4435,12 @@ components:
         approved_bookings: {type: integer, minimum: 0}
         declined_bookings: {type: integer, minimum: 0}
         created_at: {type: string, format: date-time}
+        status: {$ref: '#/components/schemas/EventRevisionStatus'}
+        can_apply: {type: boolean}
+        applied_at: {type: [string, 'null'], format: date-time}
     BookingEventRevision:
       type: object
-      required: [id, revision, before, after, created_at, decision, decided_at, can_decide]
+      required: [id, revision, before, after, created_at, decision, decided_at, can_decide, status]
       properties:
         id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
@@ -4418,6 +4453,10 @@ components:
           - {type: 'null'}
         decided_at: {type: [string, 'null'], format: date-time}
         can_decide: {type: boolean}
+        status: {$ref: '#/components/schemas/EventRevisionStatus'}
+    EventRevisionStatus:
+      type: string
+      enum: [proposed, applied, superseded]
     EventRevisionDecisionChoice:
       type: string
       enum: [approved, declined]

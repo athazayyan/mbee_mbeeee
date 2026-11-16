@@ -82,9 +82,12 @@ func (s Store) list(ctx context.Context, actor, businessID string, before time.T
 				SELECT e.status IN ('published', 'live') AND (
 					b.status = 'confirmed' OR (b.status IN ('held', 'payment_pending') AND b.expires_at > statement_timestamp())
 				) AND EXISTS (
-					SELECT 1 FROM event_revision_bookings rb
+					SELECT 1 FROM event_revision_bookings rb JOIN event_revisions r ON r.id = rb.revision_id
 					WHERE rb.booking_id = b.id AND NOT EXISTS (
 						SELECT 1 FROM event_revision_decisions d WHERE d.revision_id = rb.revision_id AND d.booking_id = b.id
+					) AND NOT EXISTS (
+						SELECT 1 FROM event_revision_applications app
+						WHERE app.event_id = r.event_id AND app.supersedes_through >= r.revision
 					)
 				) AS pending
 			) revision

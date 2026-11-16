@@ -22,11 +22,10 @@ type bookingRevision struct {
 	Decision  *string          `json:"decision"`
 	DecidedAt *time.Time       `json:"decided_at"`
 	CanDecide bool             `json:"can_decide"`
+	Status    string           `json:"status"`
 }
 
-const activeRevisionBooking = `e.status IN ('published', 'live') AND (
-	bk.status = 'confirmed' OR (bk.status IN ('held', 'payment_pending') AND bk.expires_at > statement_timestamp())
-)`
+const activeRevisionBooking = `e.status IN ('published', 'live') AND (` + activeBooking + `)`
 
 var (
 	errDecisionClosed   = errors.New("booking revision decision is closed")
@@ -81,11 +80,13 @@ func (s Store) bookingRevisions(ctx context.Context, actor, id string, before ti
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT r.id, r.revision, r.snapshot_before, r.snapshot_after, r.created_at,
-			d.decision, d.decided_at, d.decision IS NULL AND (`+activeRevisionBooking+`)
-			FROM event_revisions r JOIN event_revision_bookings b ON b.revision_id = r.id AND b.event_id = r.event_id
-			JOIN bookings bk ON bk.id = b.booking_id JOIN events e ON e.id = r.event_id
-			LEFT JOIN event_revision_decisions d ON d.revision_id = r.id AND d.booking_id = bk.id
-			WHERE r.event_id = $1 AND b.booking_id = $2 AND ($3::uuid IS NULL OR (r.created_at, r.id) < ($4, $3))
+			d.decision, d.decided_at, d.decision IS NULL AND (`+activeRevisionBooking+`) AND NOT (`+revisionClosed+`),
+			`+revisionStatusSQL+`
+			FROM event_revisions r JOIN event_revision_bookings rb ON rb.revision_id = r.id AND rb.event_id = r.event_id
+			JOIN bookings b ON b.id = rb.booking_id JOIN events e ON e.id = r.event_id
+			LEFT JOIN event_revision_decisions d ON d.revision_id = r.id AND d.booking_id = b.id
+			LEFT JOIN event_revision_applications app ON app.revision_id = r.id
+			WHERE r.event_id = $1 AND rb.booking_id = $2 AND ($3::uuid IS NULL OR (r.created_at, r.id) < ($4, $3))
 			ORDER BY r.created_at DESC, r.id DESC LIMIT $5`, eventID, id, nilIfEmpty(beforeID), before, limit)
 		if err != nil {
 			return err
@@ -93,7 +94,7 @@ func (s Store) bookingRevisions(ctx context.Context, actor, id string, before ti
 		revisions, err = pgx.AppendRows(make([]bookingRevision, 0), rows, func(row pgx.CollectableRow) (bookingRevision, error) {
 			var revision bookingRevision
 			err := row.Scan(&revision.ID, &revision.Revision, &revision.Before, &revision.After, &revision.CreatedAt,
-				&revision.Decision, &revision.DecidedAt, &revision.CanDecide)
+				&revision.Decision, &revision.DecidedAt, &revision.CanDecide, &revision.Status)
 			return revision, err
 		})
 		return err
@@ -146,13 +147,20 @@ func (s Store) recordBookingRevisionDecision(ctx context.Context, actor, id, rev
 		var active bool
 		err := tx.QueryRow(ctx, `SELECT `+activeRevisionBooking+`
 			FROM event_revision_bookings rb
-			JOIN bookings bk ON bk.id = rb.booking_id JOIN events e ON e.id = rb.event_id
-			JOIN memberships m ON m.business_id = bk.business_id AND m.user_id = $3 AND m.role = 'owner'
+			JOIN bookings b ON b.id = rb.booking_id JOIN events e ON e.id = rb.event_id
+			JOIN memberships m ON m.business_id = b.business_id AND m.user_id = $3 AND m.role = 'owner'
 			WHERE rb.revision_id = $1 AND rb.booking_id = $2 FOR SHARE OF e, m`, revisionID, id, actor).Scan(&active)
 		if err != nil {
 			return err
 		}
+		var closed bool
 		if active {
+			// Read after obtaining the event lock to see any concurrent application.
+			if err := tx.QueryRow(ctx, `SELECT `+revisionClosed+` FROM event_revisions r WHERE r.id = $1`, revisionID).Scan(&closed); err != nil {
+				return err
+			}
+		}
+		if active && !closed {
 			err = tx.QueryRow(ctx, `INSERT INTO event_revision_decisions (revision_id, booking_id, decided_by, decision)
 				VALUES ($1, $2, $3, $4) ON CONFLICT (revision_id, booking_id) DO NOTHING
 				RETURNING decision, decided_at`, revisionID, id, actor, decision).Scan(&result.Decision, &result.DecidedAt)
