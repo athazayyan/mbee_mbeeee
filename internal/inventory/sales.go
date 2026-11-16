@@ -78,6 +78,8 @@ type SaleItem struct {
 	UnitCost    *int64 `json:"unit_cost,omitempty"`
 	Discount    int64  `json:"discount"`
 	Subtotal    int64  `json:"subtotal"`
+	// ReturnedQuantity adalah jumlah yang sudah dikembalikan lewat void atau retur.
+	ReturnedQuantity int64 `json:"returned_quantity"`
 }
 
 type Sale struct {
@@ -96,6 +98,9 @@ type Sale struct {
 	Method          string     `json:"method"`
 	Discount        int64      `json:"discount"`
 	Total           int64      `json:"total"`
+	// RefundedAmount adalah total nilai void dan retur; omzet bersih = Total - RefundedAmount.
+	RefundedAmount int64 `json:"refunded_amount"`
+	Voided         bool  `json:"voided"`
 }
 
 // syncOutcome adalah hasil per transaksi; Code terisi untuk rejected dan retryable.
@@ -399,7 +404,9 @@ func (s Store) listSales(ctx context.Context, actor, business string, filter sal
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text, received_at, sale_id::text, device_id::text, business_id::text,
-			session_id::text, event_id::text, client_created_at, schema_version, payload_hash, currency, method, discount, total
+			session_id::text, event_id::text, client_created_at, schema_version, payload_hash, currency, method, discount, total,
+			(SELECT COALESCE(sum(a.amount), 0) FROM sale_adjustments a WHERE a.sale_ref = sales.id),
+			EXISTS (SELECT 1 FROM sale_adjustments a WHERE a.sale_ref = sales.id AND a.type = 'void')
 			FROM sales WHERE business_id = $1
 			AND ($2::timestamptz IS NULL OR client_created_at >= $2)
 			AND ($3::timestamptz IS NULL OR client_created_at < $3)
@@ -415,7 +422,7 @@ func (s Store) listSales(ctx context.Context, actor, business string, filter sal
 			var sale Sale
 			err := row.Scan(&sale.ID, &sale.ReceivedAt, &sale.SaleID, &sale.DeviceID, &sale.BusinessID, &sale.SessionID,
 				&sale.EventID, &sale.ClientCreatedAt, &sale.SchemaVersion, &sale.PayloadHash, &sale.Currency, &sale.Method,
-				&sale.Discount, &sale.Total)
+				&sale.Discount, &sale.Total, &sale.RefundedAmount, &sale.Voided)
 			sale.Items = []SaleItem{}
 			return sale, err
 		})
@@ -429,7 +436,9 @@ func (s Store) listSales(ctx context.Context, actor, business string, filter sal
 			ids[i] = sale.ID
 		}
 		items, err := tx.Query(ctx, `SELECT sale_ref::text, id::text, product_id::text, product_name, quantity, unit_price,
-			unit_cost, discount, subtotal FROM sale_items WHERE sale_ref = ANY($1::uuid[]) ORDER BY sale_ref, position`, ids)
+			unit_cost, discount, subtotal,
+			(SELECT COALESCE(sum(ai.quantity), 0) FROM sale_adjustment_items ai WHERE ai.sale_item_id = sale_items.id)
+			FROM sale_items WHERE sale_ref = ANY($1::uuid[]) ORDER BY sale_ref, position`, ids)
 		if err != nil {
 			return err
 		}
@@ -438,7 +447,7 @@ func (s Store) listSales(ctx context.Context, actor, business string, filter sal
 			var ref string
 			var item SaleItem
 			if err := items.Scan(&ref, &item.ID, &item.ProductID, &item.ProductName, &item.Quantity, &item.UnitPrice,
-				&item.UnitCost, &item.Discount, &item.Subtotal); err != nil {
+				&item.UnitCost, &item.Discount, &item.Subtotal, &item.ReturnedQuantity); err != nil {
 				return err
 			}
 			result[index[ref]].Items = append(result[index[ref]].Items, item)
