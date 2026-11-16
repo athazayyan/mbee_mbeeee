@@ -48,6 +48,11 @@ type pricingState struct {
 	Latest *priceVersion `json:"latest"`
 }
 
+const activePricingQuery = `SELECT event_id, revision::text, effective_at, rules
+	FROM event_pricing_versions WHERE event_id = $1
+	AND effective_at <= COALESCE($2::timestamptz, transaction_timestamp())
+	ORDER BY effective_at DESC, revision DESC LIMIT 1`
+
 func (input *priceInput) fields() fieldErrors {
 	fields := input.priceRules.validate()
 	if len(input.StandPrices) != 0 {
@@ -82,9 +87,7 @@ func (s Store) getPricing(c *gin.Context, account auth.Account) {
 		if err != nil {
 			return err
 		}
-		state.Active, err = loadPriceVersion(ctx, tx, `SELECT event_id, revision::text, effective_at, rules
-			FROM event_pricing_versions WHERE event_id = $1 AND effective_at <= transaction_timestamp()
-			ORDER BY effective_at DESC, revision DESC LIMIT 1`, eventID)
+		state.Active, err = loadPriceVersion(ctx, tx, activePricingQuery, eventID, nil)
 		return err
 	})
 	if err != nil {
