@@ -2740,7 +2740,8 @@ paths:
       tags: [Produk dan kasir]
       operationId: openPosSession
       summary: Buka sesi kasir
-      description: Semua anggota usaha. device_id dibuat dan disimpan perangkat kasir. Bila perangkat sudah punya sesi
+      description: Semua anggota usaha. device_id dibuat dan disimpan perangkat kasir; perangkat terdaftar otomatis
+        pada sesi pertama dan perangkat yang dicabut ditolak 403 DEVICE_REVOKED. Bila perangkat sudah punya sesi
         terbuka untuk acara yang sama, sesi itu dikembalikan dengan 200; sesi terbuka untuk acara lain ditutup lalu
         sesi baru dibuat dengan 201. Sesi harus tercatat sebelum sync.
       x-implementation-status: implemented
@@ -2803,6 +2804,132 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/devices:
+    get:
+      tags: [Produk dan kasir]
+      operationId: listPosDevices
+      summary: Daftar perangkat kasir
+      description: Semua anggota usaha. Perangkat aktif lebih dulu, lalu yang dicabut. Paling banyak 200.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/PosDevice'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Usaha atau perangkat tidak ditemukan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/devices/{device}/revoke:
+    post:
+      tags: [Produk dan kasir]
+      operationId: revokePosDevice
+      summary: Cabut perangkat kasir
+      description: Hanya pemilik usaha. Menutup sesi terbuka perangkat. Sync berikutnya dari perangkat ini mendapat
+        retryable DEVICE_REVOKED sehingga transaksi lokal tidak hilang.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: device
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: {type: string, maxLength: 200}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PosDevice'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Usaha atau perangkat tidak ditemukan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /businesses/{id}/devices/{device}/restore:
+    post:
+      tags: [Produk dan kasir]
+      operationId: restorePosDevice
+      summary: Pulihkan perangkat kasir
+      description: Hanya pemilik usaha. Perangkat bisa membuka sesi dan sync lagi, termasuk transaksi yang tertahan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - name: device
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PosDevice'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Usaha atau perangkat tidak ditemukan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /sync/sales:
     post:
       tags: [Produk dan kasir]
@@ -2813,8 +2940,9 @@ paths:
         menghasilkan SYNC_PAYLOAD_CONFLICT. Server menghitung ulang subtotal (quantity x unit_price - discount) dan
         total (jumlah subtotal - discount). Stok produk dikurangi lewat mutasi 'sale' dan boleh menjadi negatif.
         Kode rejected - INVALID_SALE, INVALID_ITEMS, INVALID_TOTAL, INVALID_TIMESTAMP (lebih dari 24 jam di masa depan),
-        UNSUPPORTED_SCHEMA_VERSION, BUSINESS_FORBIDDEN, UNKNOWN_SESSION, UNKNOWN_EVENT, UNKNOWN_PRODUCT,
-        SYNC_PAYLOAD_CONFLICT. retryable berarti kirim ulang nanti tanpa mengubah isi. Body di atas 1 MiB ditolak 413.
+        UNSUPPORTED_SCHEMA_VERSION, BUSINESS_FORBIDDEN, UNKNOWN_SESSION, UNKNOWN_DEVICE, UNKNOWN_EVENT,
+        UNKNOWN_PRODUCT, SYNC_PAYLOAD_CONFLICT. retryable berarti kirim ulang nanti tanpa mengubah isi; kode
+        DEVICE_REVOKED berarti perangkat dicabut pemilik - simpan transaksi dan kirim lagi setelah dipulihkan. Body di atas 1 MiB ditolak 413.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -5300,6 +5428,20 @@ components:
       properties:
         device_id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
+        label: {type: string, maxLength: 80, description: Nama perangkat agar mudah dikenali pemilik.}
+    PosDevice:
+      type: object
+      required: [id, business_id, registered_at, last_seen_at, open_session]
+      properties:
+        id: {type: string, format: uuid}
+        business_id: {type: string, format: uuid}
+        label: {type: string}
+        registered_at: {type: string, format: date-time}
+        last_seen_at: {type: string, format: date-time}
+        last_synced_at: {type: string, format: date-time}
+        revoked_at: {type: string, format: date-time}
+        revoke_reason: {type: string}
+        open_session: {type: boolean}
     PosSession:
       type: object
       required: [id, business_id, device_id, opened_at, status]

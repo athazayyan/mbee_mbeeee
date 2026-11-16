@@ -31,6 +31,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/businesses/:id/products", sessions.WithAccount(s.listProducts))
 	api.GET("/businesses/:id/sales", sessions.WithAccount(s.listSalesHandler))
 	api.GET("/businesses/:id/expenses", sessions.WithAccount(s.getExpenses))
+	api.GET("/businesses/:id/devices", sessions.WithAccount(s.getDevices))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -42,6 +43,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.POST("/sync/sales", sessions.WithAccount(s.syncSales))
 	mutations.POST("/sales/:id/adjustments", sessions.WithAccount(s.createAdjustment))
 	mutations.POST("/businesses/:id/expenses", sessions.WithAccount(s.postExpense))
+	mutations.POST("/businesses/:id/devices/:device/revoke", sessions.WithAccount(s.revokeDevice))
+	mutations.POST("/businesses/:id/devices/:device/restore", sessions.WithAccount(s.restoreDevice))
 }
 
 func validRupiah(value *int64) bool { return value == nil || (*value >= 0 && *value <= maxRupiah) }
@@ -261,6 +264,8 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Data atau usaha tidak ditemukan.", nil)
 	case errors.Is(err, errIdempotencyMismatch):
 		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Gunakan key baru untuk permintaan yang berbeda.", nil)
+	case errors.Is(err, errDeviceRevoked):
+		httpapi.Error(c, http.StatusForbidden, "DEVICE_REVOKED", "Perangkat ini sudah dicabut pemilik usaha. Minta pemilik memulihkannya.", nil)
 	case errors.Is(err, errSaleVoided):
 		httpapi.Error(c, http.StatusConflict, "SALE_ALREADY_VOIDED", "Transaksi ini sudah di-void.", nil)
 	case errors.Is(err, errNothingToAdjust):

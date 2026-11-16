@@ -37,6 +37,8 @@ type PosSession struct {
 type posSessionInput struct {
 	DeviceID string  `json:"device_id"`
 	EventID  *string `json:"event_id"`
+	// Label membantu pemilik mengenali perangkat, misalnya "Chrome di Android".
+	Label *string `json:"label,omitempty"`
 }
 
 type saleItemInput struct {
@@ -200,6 +202,17 @@ func validateSessionInput(input *posSessionInput) fieldErrors {
 			input.EventID = &event
 		}
 	}
+	if input.Label != nil {
+		label := strings.TrimSpace(*input.Label)
+		switch {
+		case label == "":
+			input.Label = nil
+		case !httpapi.ValidSingleLine(label, 80):
+			fields["label"] = "Nama perangkat satu baris hingga 80 karakter."
+		default:
+			input.Label = &label
+		}
+	}
 	if len(fields) == 0 {
 		return nil
 	}
@@ -230,6 +243,17 @@ func (s Store) openSession(ctx context.Context, actor, business string, input po
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		if err := requireMember(ctx, tx, actor, business, false); err != nil {
 			return err
+		}
+		// Perangkat terdaftar otomatis pada sesi pertama; perangkat yang dicabut tidak bisa membuka sesi.
+		var revoked bool
+		if err := tx.QueryRow(ctx, `INSERT INTO pos_devices (business_id, id, label, registered_by) VALUES ($1, $2, $3, $4)
+			ON CONFLICT (business_id, id) DO UPDATE SET last_seen_at = clock_timestamp(),
+				label = COALESCE(EXCLUDED.label, pos_devices.label)
+			RETURNING revoked_at IS NOT NULL`, business, input.DeviceID, input.Label, actor).Scan(&revoked); err != nil {
+			return err
+		}
+		if revoked {
+			return errDeviceRevoked
 		}
 		if input.EventID != nil {
 			var found bool
@@ -291,6 +315,17 @@ func (s Store) syncSale(ctx context.Context, actor string, sale saleInput) syncO
 		}
 		if !sessionFound {
 			return rejection("UNKNOWN_SESSION")
+		}
+		var revoked bool
+		if err := tx.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM pos_devices WHERE business_id = $1 AND id = $2`,
+			sale.BusinessID, sale.DeviceID).Scan(&revoked); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return rejection("UNKNOWN_DEVICE")
+			}
+			return err
+		}
+		if revoked {
+			return errDeviceRevoked
 		}
 		if sale.EventID != nil {
 			var eventFound bool
@@ -355,6 +390,10 @@ func (s Store) syncSale(ctx context.Context, actor string, sale saleInput) syncO
 				return err
 			}
 		}
+		if _, err := tx.Exec(ctx, `UPDATE pos_devices SET last_synced_at = clock_timestamp(), last_seen_at = clock_timestamp()
+			WHERE business_id = $1 AND id = $2`, sale.BusinessID, sale.DeviceID); err != nil {
+			return err
+		}
 		outcome.Status = "accepted"
 		return nil
 	})
@@ -362,6 +401,9 @@ func (s Store) syncSale(ctx context.Context, actor string, sale saleInput) syncO
 	switch {
 	case errors.As(err, &rejected):
 		return syncOutcome{SaleID: sale.SaleID, Status: "rejected", Code: string(rejected)}
+	case errors.Is(err, errDeviceRevoked):
+		// Bukan penolakan permanen: transaksi tetap disimpan perangkat dan dikirim lagi setelah perangkat dipulihkan.
+		return syncOutcome{SaleID: sale.SaleID, Status: "retryable", Code: "DEVICE_REVOKED"}
 	case err != nil:
 		return syncOutcome{SaleID: sale.SaleID, Status: "retryable", Code: "INTERNAL_ERROR"}
 	case outcome.Status == "":
