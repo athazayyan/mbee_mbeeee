@@ -1192,8 +1192,8 @@ paths:
     post:
       tags: [Acara dan katalog]
       operationId: cancelEvent
-      summary: Batalkan draft acara
-      description: Pemilik organisasi dapat membatalkan draft dengan alasan. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat. Pembatalan acara terbit dan refund direncanakan setelah integrasi booking.
+      summary: Batalkan acara
+      description: Pemilik organisasi dapat membatalkan draft atau acara terbit/berlangsung tanpa riwayat booking. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat. Acara terbit dengan riwayat booking mengembalikan 409 EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW.
       x-implementation-status: implemented
       security:
       - AccessCookie: []

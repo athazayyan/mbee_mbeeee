@@ -14,6 +14,8 @@ import (
 )
 
 var errCancelReasonChanged = errors.New("event was already cancelled with a different reason")
+var errCancellationNeedsBookingWorkflow = errors.New("event cancellation requires booking workflow")
+var errEventNotCancellable = errors.New("event status does not allow cancellation")
 
 type duplicateInput struct {
 	Name string `json:"name"`
@@ -79,15 +81,23 @@ func (s Store) cancelEvent(c *gin.Context, account auth.Account) {
 		writeError(c, fieldErrors{"reason": "Masukkan alasan pembatalan dengan panjang 1–2.000 karakter."})
 		return
 	}
-	data, err := s.cancelDraft(c.Request.Context(), account.ID, id, reason)
-	if errors.Is(err, errCancelReasonChanged) {
+	data, err := s.cancel(c.Request.Context(), account.ID, id, reason)
+	switch {
+	case errors.Is(err, errCancelReasonChanged):
 		httpapi.Error(c, http.StatusConflict, "EVENT_ALREADY_CANCELLED", "Acara sudah dibatalkan dengan alasan berbeda.", nil)
+		return
+	case errors.Is(err, errCancellationNeedsBookingWorkflow):
+		httpapi.Error(c, http.StatusConflict, "EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW",
+			"Acara memiliki riwayat booking. Pembatalan perlu penanganan booking dan refund.", nil)
+		return
+	case errors.Is(err, errEventNotCancellable):
+		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_CANCELLABLE", "Status acara tidak mengizinkan pembatalan.", nil)
 		return
 	}
 	writeEvent(c, http.StatusOK, data, err)
 }
 
-func (s Store) cancelDraft(ctx context.Context, actor, id, reason string) (event, error) {
+func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, error) {
 	var cancelled event
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		previous, err := lockOwnedEvent(ctx, tx, actor, id)
@@ -98,10 +108,10 @@ func (s Store) cancelDraft(ctx context.Context, actor, id, reason string) (event
 		case "cancelled":
 			var recorded string
 			err := tx.QueryRow(ctx, `SELECT reason FROM event_status_history
-				WHERE event_id = $1 AND from_status = 'draft' AND to_status = 'cancelled'
+				WHERE event_id = $1 AND from_status IN ('draft', 'published', 'live') AND to_status = 'cancelled' AND reason IS NOT NULL
 				ORDER BY id DESC LIMIT 1`, id).Scan(&recorded)
 			if errors.Is(err, pgx.ErrNoRows) {
-				return errDraftRequired
+				return errEventNotCancellable
 			}
 			if err != nil {
 				return err
@@ -112,19 +122,28 @@ func (s Store) cancelDraft(ctx context.Context, actor, id, reason string) (event
 			cancelled = previous
 			return nil
 		case "draft":
-			cancelled, err = scanEvent(tx.QueryRow(ctx, `UPDATE events AS e
-				SET status = 'cancelled', updated_at = clock_timestamp()
-				WHERE e.id = $1 RETURNING `+eventColumns, id))
-			if err != nil {
+		case "published", "live":
+			// Hold creation acquires the same event row lock before inserting bookings.
+			var hasBookings bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bookings WHERE event_id = $1)`, id).Scan(&hasBookings); err != nil {
 				return err
 			}
-			_, err = tx.Exec(ctx, `INSERT INTO event_status_history
-				(event_id, actor_id, from_status, to_status, reason)
-				VALUES ($1, $2, 'draft', 'cancelled', $3)`, id, actor, reason)
-			return err
+			if hasBookings {
+				return errCancellationNeedsBookingWorkflow
+			}
 		default:
-			return errDraftRequired
+			return errEventNotCancellable
 		}
+		cancelled, err = scanEvent(tx.QueryRow(ctx, `UPDATE events AS e
+			SET status = 'cancelled', updated_at = clock_timestamp()
+			WHERE e.id = $1 RETURNING `+eventColumns, id))
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO event_status_history
+			(event_id, actor_id, from_status, to_status, reason)
+			VALUES ($1, $2, $3, 'cancelled', $4)`, id, actor, previous.Status, reason)
+		return err
 	})
 	return cancelled, err
 }
