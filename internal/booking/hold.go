@@ -49,6 +49,8 @@ type OfferRequest struct {
 }
 
 type Offer struct {
+	StandCode     string
+	BlockLabel    string
 	BlockID       *string
 	EventQuota    *int
 	BlockQuota    *int

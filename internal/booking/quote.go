@@ -20,6 +20,8 @@ type holdQuoteInput struct {
 type holdQuote struct {
 	holdQuoteInput
 	EventName     string    `json:"event_name"`
+	StandCode     string    `json:"stand_code,omitempty"`
+	BlockLabel    string    `json:"block_label,omitempty"`
 	EventTerms    string    `json:"event_terms"`
 	PolicyVersion string    `json:"refund_policy_version"`
 	RefundTerms   string    `json:"refund_terms"`
@@ -76,6 +78,7 @@ func (s Store) quoteHold(ctx context.Context, actor string, input holdQuoteInput
 			return ErrHoldUnavailable
 		}
 		result.EventTerms, result.PolicyVersion, result.RefundTerms = *terms, offer.PolicyVersion, offer.RefundTerms
+		result.StandCode, result.BlockLabel = offer.StandCode, offer.BlockLabel
 		result.Price, err = priceFromOffer(offer)
 		return err
 	})

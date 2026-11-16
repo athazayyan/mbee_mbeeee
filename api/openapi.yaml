@@ -4620,6 +4620,8 @@ components:
         required: [event_name, event_terms, refund_policy_version, refund_terms, price]
         properties:
           event_name: {type: string}
+          stand_code: {type: string, description: Kode stand dari denah acara.}
+          block_label: {type: string, description: Nama blok ketika stand berada di dalam blok.}
           event_terms: {type: string}
           refund_policy_version: {type: string}
           refund_terms: {type: string}
