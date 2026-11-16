@@ -58,6 +58,21 @@ go run . worker
 
 Worker membaca `DATABASE_URL` dan memeriksa hold yang jatuh tempo setiap 5 detik. Untuk satu siklus pemrosesan, gunakan `go run . worker --once`. Pada deployment, jalankan `./tenantku worker` sebagai proses terpisah dari API. Log JSON worker memuat `job_id` saat booking dilepas atau terjadi kegagalan.
 
+## Hak akses PostgreSQL saat deployment
+
+Siapkan tiga akun di setiap database TenantKu. Akun migration memiliki database dan tabel. Akun API dan akun worker adalah akun login khusus layanan dengan hak akses dari `deploy/postgres/runtime.sql`. Simpan kredensial tiap akun di konfigurasi secret environment masing-masing.
+
+```bash
+go build -o tenantku .
+DATABASE_URL="$MIGRATION_DATABASE_URL" ./tenantku migrate
+PGSERVICE=tenantku-migration psql -X -v api_role=tenantku_api -v worker_role=tenantku_worker \
+  -f deploy/postgres/runtime.sql
+```
+
+Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `api_role` dan `worker_role` sesuai akun yang sudah dibuat. Jalankan skrip hanya pada database khusus TenantKu. Skrip menutup akses bawaan PostgreSQL untuk `PUBLIC` pada database tersebut dan menerapkan ulang hak akses kedua akun layanan setelah migration atau restore.
+
+Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
+
 ## Verifikasi lokal
 
 | Endpoint | Hasil yang diharapkan |
