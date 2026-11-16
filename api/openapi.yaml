@@ -4366,9 +4366,11 @@ components:
           base_price: {$ref: '#/components/schemas/Rupiah'}
     PublicLayout:
       type: object
-      required: [event_id, revision, width, height, cell_meters, blocks, stands, areas]
+      required: [event_id, event_name, event_slot_id, revision, width, height, cell_meters, blocks, stands, areas]
       properties:
         event_id: {type: string, format: uuid}
+        event_name: {type: string}
+        event_slot_id: {type: [string, 'null'], format: uuid, description: Slot yang dipakai untuk harga dan ketersediaan. Null jika semua slot berakhir.}
         revision: {type: integer, minimum: 1}
         width: {type: integer, minimum: 4, maximum: 60}
         height: {type: integer, minimum: 4, maximum: 60}

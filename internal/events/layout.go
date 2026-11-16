@@ -97,6 +97,8 @@ type publicStand struct {
 
 type publicLayout struct {
 	EventID    string        `json:"event_id"`
+	EventName  string        `json:"event_name"`
+	SlotID     *string       `json:"event_slot_id"`
 	Revision   int           `json:"revision"`
 	Width      int           `json:"width"`
 	Height     int           `json:"height"`
@@ -470,9 +472,9 @@ func loadLayout(ctx context.Context, tx pgx.Tx, eventID string) (layoutRevision,
 func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayout, error) {
 	var result publicLayout
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		var status string
+		var status, name string
 		var at time.Time
-		if err := tx.QueryRow(ctx, `SELECT status, transaction_timestamp() FROM events WHERE id = $1`, eventID).Scan(&status, &at); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT status, name, transaction_timestamp() FROM events WHERE id = $1`, eventID).Scan(&status, &name, &at); err != nil {
 			return err
 		}
 		if status != "published" && status != "live" {
@@ -483,8 +485,9 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 			return err
 		}
 		var slotID string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM event_slots
-			WHERE event_id = $1 ORDER BY starts_at, id LIMIT 1`, eventID).Scan(&slotID); err != nil {
+		var slotEnds time.Time
+		if err := tx.QueryRow(ctx, `SELECT id::text, ends_at FROM event_slots
+			WHERE event_id = $1 ORDER BY (ends_at > $2) DESC, starts_at, id LIMIT 1`, eventID, at).Scan(&slotID, &slotEnds); err != nil {
 			return err
 		}
 		taken := make(map[string]string)
@@ -512,16 +515,19 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 			return err
 		}
 		result = publicLayout{
-			EventID: layout.EventID, Revision: layout.Revision, Width: layout.Width, Height: layout.Height,
+			EventID: layout.EventID, EventName: name, Revision: layout.Revision, Width: layout.Width, Height: layout.Height,
 			CellMeters: layout.CellMeters, Blocks: layout.Blocks, Areas: layout.Areas,
 			Stands: make([]publicStand, 0, len(layout.Stands)),
+		}
+		if slotEnds.After(at) {
+			result.SlotID = &slotID
 		}
 		for _, stand := range layout.Stands {
 			value := publicStand{layoutStand: stand, Status: "available", BasePrice: prices[stand.ID]}
 			switch {
 			case taken[stand.ID] == "reserved":
 				value.Status = "booked"
-			case !stand.Active || taken[stand.ID] != "":
+			case result.SlotID == nil || !stand.Active || taken[stand.ID] != "":
 				value.Status = "unavailable"
 			}
 			result.Stands = append(result.Stands, value)
