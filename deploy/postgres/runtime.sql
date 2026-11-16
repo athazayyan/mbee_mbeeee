@@ -47,7 +47,7 @@ REVOKE INSERT (booking_id, actor_id, from_status, to_status, reason)
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
     public.event_pricing_versions, public.event_revisions, public.event_revision_bookings,
-    public.organization_event_history TO :"api_role";
+    public.event_revision_decisions, public.organization_event_history TO :"api_role";
 GRANT SELECT (id, email, password_hash, email_verified_at),
     UPDATE (password_hash, email_verified_at) ON public.users TO :"api_role";
 GRANT SELECT (token_hash, user_id, purpose, expires_at, used_at, created_at),
@@ -90,6 +90,7 @@ GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.eve
 GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapshot_after, idempotency_key, request_digest)
     ON public.event_revisions TO :"api_role";
 GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
+GRANT INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
 
