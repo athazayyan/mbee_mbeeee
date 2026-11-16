@@ -37,6 +37,7 @@ func TestHoldHTTPContention(t *testing.T) {
 	offers := testOffers{Offer{
 		PriceRevision: 1, Rent: 30_000, PlatformFee: 1_000, ProviderFee: 500,
 		PolicyVersion: "test-policy", RefundPolicy: json.RawMessage(`{"test":true}`),
+		RefundTerms: "Ketentuan refund uji",
 	}}
 	if err := store.HoldRoutes(api, service, origin, settings, offers); err != nil {
 		t.Fatal(err)
@@ -101,15 +102,40 @@ func TestHoldHTTPContention(t *testing.T) {
 	execBookingSQL(t, ctx, store, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
 		VALUES ($1, 1, $2, '{"default_base_price":30000}', now())`, event, organizer)
 
-	input := func(tenant tenant, stand, policy string) []byte {
-		body, err := json.Marshal(HoldInput{tenant.business, event, stand, slot, policy})
+	jsonBody := func(input any) []byte {
+		t.Helper()
+		body, err := json.Marshal(input)
 		if err != nil {
-			panic(err)
+			t.Fatal(err)
 		}
 		return body
 	}
+	input := func(tenant tenant, stand, policy string) []byte {
+		return jsonBody(HoldInput{BusinessID: tenant.business, EventID: event, StandID: stand, EventSlotID: slot, AcceptedPolicyVersion: policy})
+	}
 	const route = "/bookings/holds"
+	const quoteRoute = "/bookings/hold-quote"
 	first, second := tenants[0], tenants[1]
+	selection := holdQuoteInput{BusinessID: first.business, EventID: event, StandID: testStandOne, EventSlotID: slot}
+	quoteRequest := func(tenant tenant) *httptest.ResponseRecorder {
+		return send(http.MethodPost, quoteRoute, origin, "", jsonBody(selection), tenant.cookies)
+	}
+	assertStatus(quoteRequest(second), http.StatusNotFound, "NOT_FOUND")
+	reply := quoteRequest(first)
+	assertStatus(reply, http.StatusOK, "")
+	var quote struct{ Data holdQuote }
+	if err := json.Unmarshal(reply.Body.Bytes(), &quote); err != nil {
+		t.Fatal(err)
+	}
+	if quote.Data.holdQuoteInput != selection || quote.Data.Price.Total != 31_500 || quote.Data.EventTerms != "Original terms" ||
+		quote.Data.PolicyVersion != "test-policy" || quote.Data.RefundTerms != "Ketentuan refund uji" {
+		t.Fatalf("unexpected quote: %s", reply.Body)
+	}
+	wrongPrice := quote.Data.Price
+	wrongPrice.ProviderFee++
+	stale := HoldInput{BusinessID: first.business, EventID: event, StandID: testStandOne, EventSlotID: slot,
+		AcceptedPolicyVersion: "test-policy", ExpectedPrice: &wrongPrice}
+	assertStatus(send(http.MethodPost, route, origin, "stale-price", jsonBody(stale), first.cookies), http.StatusConflict, "HOLD_PRICE_CHANGED")
 	body := input(first, testStandOne, "test-policy")
 	assertStatus(send(http.MethodPost, route, origin, "auth", body, nil), http.StatusUnauthorized, "")
 	assertStatus(send(http.MethodPost, route, "https://foreign.example", "origin", body, first.cookies), http.StatusForbidden, "ORIGIN_REJECTED")
@@ -148,6 +174,7 @@ func TestHoldHTTPContention(t *testing.T) {
 	if len(winners) != 1 {
 		t.Fatalf("%d winners for %d requests", len(winners), contenders)
 	}
+	assertStatus(quoteRequest(first), http.StatusConflict, "STAND_UNAVAILABLE")
 	winner := winners[0]
 	type holdResponse struct {
 		Data Booking
@@ -185,9 +212,12 @@ func TestHoldHTTPContention(t *testing.T) {
 		t.Fatalf("retry changed hold: %+v", replayed)
 	}
 	assertStatus(replay(winner.key, testStandTwo), http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH")
-	assertStatus(replay("second-hold", testStandTwo), http.StatusCreated, "")
+	accepted := HoldInput{BusinessID: winner.tenant.business, EventID: event, StandID: testStandTwo, EventSlotID: slot,
+		AcceptedPolicyVersion: "test-policy", ExpectedPrice: &quote.Data.Price}
+	assertStatus(send(http.MethodPost, route, origin, "second-hold", jsonBody(accepted), cookies), http.StatusCreated, "")
 	assertStatus(replay("limit-reached", testStandThree), http.StatusTooManyRequests, "HOLD_LIMIT_REACHED")
 	execBookingSQL(t, ctx, store, `UPDATE bookings SET expires_at = now() - interval '1 second' WHERE id = $1`, created.Data.ID)
+	assertStatus(quoteRequest(first), http.StatusOK, "")
 	retried = replay(winner.key, testStandOne)
 	assertStatus(retried, http.StatusOK, "")
 	if replayed := decode(retried); replayed.Data.Status != "expired" || replayed.Data.ID != created.Data.ID {

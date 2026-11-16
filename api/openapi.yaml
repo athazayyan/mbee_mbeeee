@@ -1537,12 +1537,44 @@ paths:
         '404': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/hold-quote:
+    post:
+      tags: [Kurasi dan booking]
+      operationId: quoteHold
+      summary: '[Rencana] Tinjau biaya dan syarat hold'
+      description: Pemilik usaha memeriksa stand pada satu slot. Respons memuat harga, syarat acara dan ketentuan refund. Simulasi ini tidak mengalokasikan stand.
+      x-implementation-status: planned
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HoldSelection'}
+      responses:
+        '200':
+          description: Harga dan ketentuan yang tersedia pada waktu server.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/HoldQuote'}
+                  meta: {$ref: '#/components/schemas/ServerTime'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/holds:
     post:
       tags: [Kurasi dan booking]
       operationId: createHold
       summary: '[Rencana] Buat hold stand'
-      description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
+      description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan jika expected_price diisi, seluruh komponen harga diverifikasi ulang. Percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
       x-implementation-status: planned
       security:
       - AccessCookie: []
@@ -1612,7 +1644,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '409':
-          description: EVENT_NOT_BOOKABLE, STAND_UNAVAILABLE, CATEGORY_QUOTA_FULL, REFUND_POLICY_CHANGED, atau IDEMPOTENCY_PAYLOAD_MISMATCH
+          description: EVENT_NOT_BOOKABLE, STAND_UNAVAILABLE, CATEGORY_QUOTA_FULL, REFUND_POLICY_CHANGED, HOLD_PRICE_CHANGED, atau IDEMPOTENCY_PAYLOAD_MISMATCH
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4339,15 +4371,36 @@ components:
       properties:
         data: {$ref: '#/components/schemas/BookingDetail'}
         meta: {$ref: '#/components/schemas/ServerTime'}
-    HoldInput:
+    HoldSelection:
       type: object
-      required: [business_id, event_id, stand_id, event_slot_id, accepted_policy_version]
+      required: [business_id, event_id, stand_id, event_slot_id]
       properties:
         business_id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
         stand_id: {type: string, format: uuid}
         event_slot_id: {type: string, format: uuid}
-        accepted_policy_version: {type: string, minLength: 1}
+    HoldInput:
+      allOf:
+      - {$ref: '#/components/schemas/HoldSelection'}
+      - type: object
+        required: [accepted_policy_version]
+        properties:
+          accepted_policy_version: {type: string, minLength: 1, maxLength: 80}
+          expected_price:
+            allOf:
+            - {$ref: '#/components/schemas/BookingPrice'}
+            description: Salin harga hasil quote untuk mendeteksi perubahan sebelum hold dibuat.
+    HoldQuote:
+      allOf:
+      - {$ref: '#/components/schemas/HoldSelection'}
+      - type: object
+        required: [event_name, event_terms, refund_policy_version, refund_terms, price]
+        properties:
+          event_name: {type: string}
+          event_terms: {type: string}
+          refund_policy_version: {type: string}
+          refund_terms: {type: string}
+          price: {$ref: '#/components/schemas/BookingPrice'}
     PaymentInput:
       type: object
       required: [method]

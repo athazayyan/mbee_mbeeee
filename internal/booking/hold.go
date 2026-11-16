@@ -22,6 +22,7 @@ var (
 	ErrStandUnavailable    = errors.New("stand is already allocated")
 	ErrQuotaFull           = errors.New("category quota reached")
 	ErrPolicyChanged       = errors.New("accepted refund policy is no longer active")
+	ErrHoldPriceChanged    = errors.New("the quoted price is no longer available")
 	ErrHoldUnavailable     = errors.New("hold configuration is unavailable")
 )
 
@@ -31,6 +32,7 @@ type HoldInput struct {
 	StandID               string `json:"stand_id"`
 	EventSlotID           string `json:"event_slot_id"`
 	AcceptedPolicyVersion string `json:"accepted_policy_version"`
+	ExpectedPrice         *Price `json:"expected_price,omitempty"`
 }
 
 type HoldSettings struct {
@@ -56,6 +58,7 @@ type Offer struct {
 	ProviderFee   int64
 	PolicyVersion string
 	RefundPolicy  json.RawMessage
+	RefundTerms   string
 }
 
 // OfferSource resolves a stand, price, category caps, and refund policy from
@@ -77,17 +80,22 @@ func validHoldKey(key string) bool {
 	return len(key) <= 128 && strings.TrimSpace(key) == key && httpapi.ValidSingleLine(key, 128)
 }
 
+func normalizeHoldIDs(ids ...*string) bool {
+	for _, id := range ids {
+		*id = strings.ToLower(*id)
+		if !httpapi.ValidID(*id) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s Store) createHold(ctx context.Context, actor, key string, input HoldInput, settings HoldSettings, source OfferSource) (Booking, bool, error) {
 	if !settings.valid(source) {
 		return Booking{}, false, ErrHoldUnavailable
 	}
-	for _, id := range []*string{&input.BusinessID, &input.EventID, &input.StandID, &input.EventSlotID} {
-		*id = strings.ToLower(*id)
-		if !httpapi.ValidID(*id) {
-			return Booking{}, false, ErrHoldInput
-		}
-	}
-	if !httpapi.ValidID(actor) || !validHoldKey(key) || !httpapi.ValidSingleLine(input.AcceptedPolicyVersion, 80) {
+	if !normalizeHoldIDs(&input.BusinessID, &input.EventID, &input.StandID, &input.EventSlotID) ||
+		!httpapi.ValidID(actor) || !validHoldKey(key) || !httpapi.ValidSingleLine(input.AcceptedPolicyVersion, 80) {
 		return Booking{}, false, ErrHoldInput
 	}
 	payload, err := json.Marshal(input)
@@ -167,7 +175,14 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		if offer.PolicyVersion != input.AcceptedPolicyVersion {
 			return ErrPolicyChanged
 		}
-		if err := checkQuota(ctx, tx, input, category, now, offer); err != nil {
+		price, err := priceFromOffer(offer)
+		if err != nil {
+			return err
+		}
+		if input.ExpectedPrice != nil && *input.ExpectedPrice != price {
+			return ErrHoldPriceChanged
+		}
+		if err := checkQuota(ctx, tx, input.EventID, category, now, offer); err != nil {
 			return err
 		}
 		expires := now.Add(settings.Lifetime)
@@ -181,7 +196,7 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 	return result, created && err == nil, err
 }
 
-func checkQuota(ctx context.Context, tx pgx.Tx, input HoldInput, category string, now time.Time, offer Offer) error {
+func checkQuota(ctx context.Context, tx pgx.Tx, eventID, category string, now time.Time, offer Offer) error {
 	if offer.EventQuota == nil && offer.BlockQuota == nil {
 		return nil
 	}
@@ -193,7 +208,7 @@ func checkQuota(ctx context.Context, tx pgx.Tx, input HoldInput, category string
 		FROM bookings b JOIN allocations a ON a.booking_id = b.id
 		WHERE b.event_id = $1 AND b.category_id = $2 AND a.status IN ('hold', 'offer', 'reserved')
 		AND (b.status = 'confirmed' OR (b.status IN ('held', 'payment_pending') AND b.expires_at > $3))`,
-		input.EventID, category, now, offer.BlockID).Scan(&eventCount, &blockCount)
+		eventID, category, now, offer.BlockID).Scan(&eventCount, &blockCount)
 	if err != nil {
 		return err
 	}

@@ -42,6 +42,18 @@ func (s Store) HoldRoutes(api *gin.RouterGroup, sessions *auth.Service, origin s
 		}
 		c.JSON(status, gin.H{"data": reply, "meta": gin.H{"server_now": reply.ServerNow}})
 	}))
+	api.POST("/bookings/hold-quote", httpapi.RequireOrigin(origin), sessions.WithAccount(func(c *gin.Context, account auth.Account) {
+		input, ok := httpapi.ReadJSON[holdQuoteInput](c, 4096)
+		if !ok {
+			return
+		}
+		quote, err := s.quoteHold(c.Request.Context(), account.ID, input, source)
+		if err != nil {
+			writeHoldError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": quote, "meta": gin.H{"server_now": quote.ServerNow}})
+	}))
 	return nil
 }
 
@@ -61,6 +73,8 @@ func writeHoldError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "CATEGORY_QUOTA_FULL", "Kuota kategori usaha sudah penuh.", nil)
 	case errors.Is(err, ErrPolicyChanged):
 		httpapi.Error(c, http.StatusConflict, "REFUND_POLICY_CHANGED", "Muat ulang dan tinjau kebijakan refund terbaru.", nil)
+	case errors.Is(err, ErrHoldPriceChanged):
+		httpapi.Error(c, http.StatusConflict, "HOLD_PRICE_CHANGED", "Harga berubah. Tinjau lagi rincian biaya sebelum membuat hold.", nil)
 	case errors.Is(err, ErrHoldLimit):
 		httpapi.Error(c, http.StatusTooManyRequests, "HOLD_LIMIT_REACHED", "Batas hold aktif tercapai.", nil)
 	case errors.Is(err, ErrHoldUnavailable):

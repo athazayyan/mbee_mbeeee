@@ -30,6 +30,7 @@ type HoldInventory interface {
 type HoldPolicy struct {
 	Version     string
 	Refund      json.RawMessage
+	RefundTerms string
 	PlatformFee int64
 	ProviderFee int64
 }
@@ -106,6 +107,7 @@ func (source HoldOfferSource) ResolveOffer(ctx context.Context, tx pgx.Tx, reque
 		BlockID: selected.BlockID, PriceRevision: revision, Rent: quote.Rent,
 		PlatformFee: policy.PlatformFee, ProviderFee: policy.ProviderFee,
 		PolicyVersion: policy.Version, RefundPolicy: policy.Refund,
+		RefundTerms: policy.RefundTerms,
 	}
 	for _, quota := range active.Rules.CategoryQuotas {
 		if quota.CategoryID != request.CategoryID {
