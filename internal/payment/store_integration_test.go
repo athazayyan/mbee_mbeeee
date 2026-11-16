@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +23,12 @@ import (
 )
 
 const testKey = "Mid-server-test"
+
+type snapTransport func(*http.Request) (*http.Response, error)
+
+func (transport snapTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return transport(req)
+}
 
 func migratedStore(t *testing.T, ctx context.Context) Store {
 	t.Helper()
@@ -269,6 +276,35 @@ func TestPaymentLifecycle(t *testing.T) {
 	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "snap"})
 	if err != nil || !created || next.ID == failing.ID {
 		t.Fatalf("retry attempt %+v %v", next, err)
+	}
+
+	// The provider can receive a request even when its response is lost.
+	timeout := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000004")
+	var orders []string
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		defer req.Body.Close()
+		var input snapRequest
+		if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
+			return nil, err
+		}
+		orders = append(orders, input.TransactionDetails.OrderID)
+		if len(orders) == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return &http.Response{StatusCode: http.StatusCreated,
+			Body: io.NopCloser(strings.NewReader(`{"token":"recovered","redirect_url":"https://pay.example/recovered"}`))}, nil
+	})}
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"}); !errors.Is(err, ErrProvider) {
+		t.Fatalf("expected provider timeout, got %v", err)
+	}
+	reserved := one(t, ctx, s, `SELECT id FROM payment_attempts WHERE booking_id = $1 AND status = 'created'`, timeout)
+	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"})
+	if err != nil || created || recovered.ID != reserved || recovered.Status != "pending" || recovered.CheckoutURL == "" {
+		t.Fatalf("timeout recovery %+v created=%v err=%v", recovered, created, err)
+	}
+	if len(orders) != 2 || orders[0] != reserved || orders[1] != reserved ||
+		count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE booking_id = $1`, timeout) != 1 {
+		t.Fatalf("timeout created distinct payment attempts: %v", orders)
 	}
 
 	// Unknown orders are stored and flagged, not errors (so the provider stops retrying).
