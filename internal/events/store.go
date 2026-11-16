@@ -41,7 +41,7 @@ func (s Store) Ready(ctx context.Context) error {
 	return err
 }
 
-func (s Store) list(ctx context.Context, actor, organization string, before time.Time, beforeID string, limit int) ([]event, error) {
+func (s Store) list(ctx context.Context, actor, organization string, before time.Time, beforeID string, limit int, query, status string) ([]event, error) {
 	var result []event
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		var org string
@@ -52,7 +52,9 @@ func (s Store) list(ctx context.Context, actor, organization string, before time
 		}
 		rows, err := tx.Query(ctx, `SELECT `+eventColumns+` FROM events e
 			WHERE e.organization_id = $1 AND ($2::uuid IS NULL OR (e.starts_at, e.id) < ($3, $2))
-			ORDER BY e.starts_at DESC, e.id DESC LIMIT $4`, org, nilIfEmpty(beforeID), before, limit)
+			AND ($5 = '' OR strpos(lower(e.name), lower($5)) > 0 OR strpos(lower(e.city), lower($5)) > 0)
+			AND ($6 = '' OR e.status = $6)
+			ORDER BY e.starts_at DESC, e.id DESC LIMIT $4`, org, nilIfEmpty(beforeID), before, limit, query, status)
 		if err != nil {
 			return err
 		}

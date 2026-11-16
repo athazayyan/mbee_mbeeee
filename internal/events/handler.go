@@ -94,7 +94,19 @@ func (s Store) listEvents(c *gin.Context, account auth.Account) {
 		writeError(c, fieldErrors{"cursor": "Gunakan cursor dari halaman sebelumnya."})
 		return
 	}
-	data, err := s.list(c.Request.Context(), account.ID, org, before, beforeID, limit+1)
+	query := strings.TrimSpace(c.Query("q"))
+	if query != "" && !httpapi.ValidSingleLine(query, 120) {
+		writeError(c, fieldErrors{"q": "Gunakan kata kunci satu baris hingga 120 karakter."})
+		return
+	}
+	status := c.Query("status")
+	switch status {
+	case "", "draft", "published", "live", "completed", "cancelled":
+	default:
+		writeError(c, fieldErrors{"status": "Pilih status acara yang valid."})
+		return
+	}
+	data, err := s.list(c.Request.Context(), account.ID, org, before, beforeID, limit+1, query, status)
 	if err != nil {
 		writeError(c, err)
 		return

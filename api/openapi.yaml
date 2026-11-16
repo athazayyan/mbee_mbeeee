@@ -755,7 +755,7 @@ paths:
       tags: [Acara dan katalog]
       operationId: listManagedEvents
       summary: Daftar acara organisasi
-      description: Khusus anggota organisasi. Cursor mengikuti urutan waktu mulai terbaru dan ID acara.
+      description: Khusus anggota organisasi. Cursor mengikuti urutan waktu mulai terbaru dan ID acara. Gunakan pencarian dan status yang sama pada halaman berikutnya.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -763,6 +763,14 @@ paths:
       - {$ref: '#/components/parameters/IdentityResourceID'}
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/Limit'}
+      - name: q
+        in: query
+        description: Bagian dari nama acara atau kota, tanpa membedakan huruf besar dan kecil.
+        schema: {type: string, maxLength: 120}
+      - name: status
+        in: query
+        description: Batasi hasil ke satu status acara.
+        schema: {type: string, enum: [draft, published, live, completed, cancelled]}
       responses:
         '200':
           description: Daftar acara privat
