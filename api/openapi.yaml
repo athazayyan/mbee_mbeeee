@@ -4746,6 +4746,7 @@ components:
         required: [accepted_policy_version]
         properties:
           accepted_policy_version: {type: string, minLength: 1, maxLength: 80}
+          event_revision_id: {type: string, format: uuid, description: Salin ID revisi dari hasil quote apabila tersedia.}
           expected_price:
             allOf:
             - {$ref: '#/components/schemas/BookingPrice'}
@@ -4754,9 +4755,15 @@ components:
       allOf:
       - {$ref: '#/components/schemas/HoldSelection'}
       - type: object
-        required: [event_name, event_terms, refund_policy_version, refund_terms, price]
+        required: [event_name, event_city, event_address, event_timezone, slot_starts_at, slot_ends_at, event_terms, refund_policy_version, refund_terms, price]
         properties:
           event_name: {type: string}
+          event_city: {type: string}
+          event_address: {type: string}
+          event_timezone: {type: string}
+          slot_starts_at: {type: string, format: date-time}
+          slot_ends_at: {type: string, format: date-time}
+          event_revision_id: {type: string, format: uuid}
           stand_code: {type: string, description: Kode stand dari denah acara.}
           block_label: {type: string, description: Nama blok ketika stand berada di dalam blok.}
           event_terms: {type: string}

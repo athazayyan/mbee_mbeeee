@@ -23,6 +23,7 @@ var (
 	ErrQuotaFull           = errors.New("category quota reached")
 	ErrPolicyChanged       = errors.New("accepted refund policy is no longer active")
 	ErrHoldPriceChanged    = errors.New("the quoted price is no longer available")
+	ErrEventDetailsChanged = errors.New("the event revision has changed")
 	ErrHoldUnavailable     = errors.New("hold configuration is unavailable")
 )
 
@@ -33,6 +34,7 @@ type HoldInput struct {
 	EventSlotID           string `json:"event_slot_id"`
 	AcceptedPolicyVersion string `json:"accepted_policy_version"`
 	ExpectedPrice         *Price `json:"expected_price,omitempty"`
+	EventRevisionID       string `json:"event_revision_id,omitempty"`
 }
 
 type HoldSettings struct {
@@ -100,6 +102,9 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		!httpapi.ValidID(actor) || !validHoldKey(key) || !httpapi.ValidSingleLine(input.AcceptedPolicyVersion, 80) {
 		return Booking{}, false, ErrHoldInput
 	}
+	if input.EventRevisionID != "" && !normalizeHoldIDs(&input.EventRevisionID) {
+		return Booking{}, false, ErrHoldInput
+	}
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return Booking{}, false, err
@@ -146,6 +151,13 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		}
 		if terms == nil || strings.TrimSpace(*terms) == "" {
 			return ErrNotBookable
+		}
+		var revision string
+		if err := tx.QueryRow(ctx, `SELECT `+currentEventRevisionSQL, input.EventID).Scan(&revision); err != nil {
+			return err
+		}
+		if input.EventRevisionID != revision {
+			return ErrEventDetailsChanged
 		}
 		var now, ends time.Time
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp(), ends_at FROM event_slots

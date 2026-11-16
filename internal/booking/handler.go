@@ -75,6 +75,8 @@ func writeHoldError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "REFUND_POLICY_CHANGED", "Muat ulang dan tinjau kebijakan refund terbaru.", nil)
 	case errors.Is(err, ErrHoldPriceChanged):
 		httpapi.Error(c, http.StatusConflict, "HOLD_PRICE_CHANGED", "Harga berubah. Tinjau lagi rincian biaya sebelum membuat hold.", nil)
+	case errors.Is(err, ErrEventDetailsChanged):
+		httpapi.Error(c, http.StatusConflict, "EVENT_DETAILS_CHANGED", "Acara berubah. Tinjau lagi jadwal, lokasi, dan syarat sebelum membuat hold.", nil)
 	case errors.Is(err, ErrHoldLimit):
 		httpapi.Error(c, http.StatusTooManyRequests, "HOLD_LIMIT_REACHED", "Batas hold aktif tercapai.", nil)
 	case errors.Is(err, ErrHoldUnavailable):
