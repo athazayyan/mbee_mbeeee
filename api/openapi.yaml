@@ -1899,9 +1899,9 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
-      summary: '[Rencana] Buat payment attempt booking'
+      summary: 'Buat payment attempt booking (Midtrans Snap)'
       description: Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -1966,10 +1966,10 @@ paths:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: acceptPaymentWebhook
-      summary: '[Rencana] Terima webhook pembayaran'
+      summary: 'Terima webhook pembayaran'
       description: Validasi signature atas payload asli. Dedupe event provider dan akui setelah penyimpanan durable. Format final
         mengikuti provider.
-      x-implementation-status: planned
+      x-implementation-status: implemented
       security:
       - ProviderSignature: []
       parameters:
