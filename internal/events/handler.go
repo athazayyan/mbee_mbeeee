@@ -65,6 +65,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/organizations/:id/event-history", sessions.WithAccount(s.listHistoricalEvents))
 	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
 	api.GET("/events/:id/revisions", sessions.WithAccount(s.listRevisions))
+	api.GET("/events", s.listPublicEvents)
+	api.GET("/events/:id", s.getPublicEvent)
 	api.GET("/events/:id/layout", s.getPublicLayout)
 	api.GET("/organizations/:id/events/:event_id/layout", sessions.WithAccount(s.getOrganizerLayout))
 	mutations := api.Group("")
