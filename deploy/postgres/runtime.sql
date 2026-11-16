@@ -98,7 +98,14 @@ GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_rev
 GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
 GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
     UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at) ON public.products TO :"api_role";
-GRANT INSERT (business_id, product_id, delta, reason, note, actor_id) ON public.inventory_movements TO :"api_role";
+GRANT INSERT (business_id, product_id, delta, reason, note, actor_id, sale_ref) ON public.inventory_movements TO :"api_role";
+-- Kasir (E10): sesi per perangkat dan penjualan hasil sync; riwayat penjualan tidak pernah diubah langsung.
+GRANT SELECT ON public.pos_sessions, public.sales, public.sale_items TO :"api_role";
+GRANT INSERT (business_id, device_id, event_id, opened_by), UPDATE (closed_at) ON public.pos_sessions TO :"api_role";
+GRANT INSERT (business_id, sale_id, device_id, session_id, event_id, client_created_at, schema_version, payload_hash,
+    request_digest, currency, method, discount, total, synced_by) ON public.sales TO :"api_role";
+GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantity, unit_price, unit_cost, discount, subtotal)
+    ON public.sale_items TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),

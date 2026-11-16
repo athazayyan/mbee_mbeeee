@@ -84,7 +84,7 @@ func scanProduct(row pgx.Row) (Product, error) {
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM products, inventory_movements LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT 1 FROM products, inventory_movements, pos_sessions, sales, sale_items LIMIT 0`)
 	return err
 }
 
