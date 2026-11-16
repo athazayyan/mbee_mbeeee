@@ -1887,6 +1887,37 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/event-revisions:
+    get:
+      tags: [Kurasi dan booking]
+      operationId: listBookingEventRevisions
+      summary: Baca usulan revisi yang berdampak pada booking
+      description: Hanya pemilik usaha pada booking. Mengembalikan usulan yang mencatat booking tersebut sebagai terdampak, dari yang terbaru. Snapshot menunjukkan usulan dan tidak mengubah booking.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Usulan revisi untuk booking
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/BookingEventRevision'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/cancel:
     post:
       tags: [Kurasi dan booking]
@@ -4296,6 +4327,15 @@ components:
         before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         affected_bookings: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+    BookingEventRevision:
+      type: object
+      required: [id, revision, before, after, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        before: {$ref: '#/components/schemas/EventMaterialSnapshot'}
+        after: {$ref: '#/components/schemas/EventMaterialSnapshot'}
         created_at: {type: string, format: date-time}
     StandLayout:
       type: object
