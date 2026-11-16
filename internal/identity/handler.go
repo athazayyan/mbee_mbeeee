@@ -19,7 +19,8 @@ const (
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/me", sessions.WithAccount(s.me))
-	api.GET("/business-categories", sessions.WithAccount(s.listCategories))
+	// Kategori usaha bersifat publik: situs memakainya untuk filter katalog tanpa login.
+	api.GET("/business-categories", s.listPublicCategories)
 	api.GET("/businesses/:id", sessions.WithAccount(s.getBusiness))
 	api.GET("/businesses/:id/consents", sessions.WithAccount(s.listConsents))
 	api.GET("/organizations/:id", sessions.WithAccount(s.getOrganization))
@@ -45,7 +46,11 @@ func (s Store) me(c *gin.Context, account auth.Account) {
 	writeResult(c, http.StatusOK, accountProfile{Account: account, Memberships: memberships}, err)
 }
 
-func (s Store) listCategories(c *gin.Context, _ auth.Account) {
+func (s Store) listPublicCategories(c *gin.Context) {
+	if s.DB == nil {
+		httpapi.Error(c, http.StatusServiceUnavailable, "CATEGORIES_UNAVAILABLE", "Kategori usaha belum dapat dimuat.", nil)
+		return
+	}
 	categories, err := s.categories(c.Request.Context())
 	writeResult(c, http.StatusOK, categories, err)
 }
@@ -220,6 +225,8 @@ func writeResult(c *gin.Context, status int, data any, err error) {
 		httpapi.Success(c, status, data)
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Profil tidak ditemukan.", nil)
+	case errors.Is(err, errBusinessAlreadyExists):
+		httpapi.Error(c, http.StatusConflict, "BUSINESS_ALREADY_EXISTS", "Akun ini sudah memiliki profil usaha.", nil)
 	case errors.As(err, &dbError) && dbError.ConstraintName == "businesses_category_id_fkey":
 		validate(c, map[string]string{"category_id": "Pilih kategori usaha yang tersedia."})
 	default:

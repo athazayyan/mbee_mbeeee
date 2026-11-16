@@ -63,6 +63,10 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 	var result Attempt
 	var created bool
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(
+			hashtextextended('tenantku.payment.attempt:' || $1::uuid::text, 0))`, actor); err != nil {
+			return err
+		}
 		var prior []byte
 		var priorBooking string
 		row := tx.QueryRow(ctx, `SELECT `+attemptColumns+`, request_digest, booking_id FROM payment_attempts
@@ -80,15 +84,18 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 			return err
 		}
 
-		var status, eventName string
+		var status string
 		var total int64
 		var expires, now time.Time
-		err = tx.QueryRow(ctx, `SELECT b.status, b.total, b.expires_at, e.name, statement_timestamp()
+		err = tx.QueryRow(ctx, `SELECT b.status, b.total, b.expires_at
 			FROM bookings b JOIN events e ON e.id = b.event_id
-			WHERE b.id = $1 AND (b.created_by = $2 OR EXISTS (
+			WHERE b.id = $1 AND e.status IN ('published', 'live') AND (b.created_by = $2 OR EXISTS (
 				SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.role = 'owner' AND m.business_id = b.business_id))
-			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &total, &expires, &eventName, &now)
+			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &total, &expires)
 		if err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
 		if (status != "held" && status != "payment_pending") || !expires.After(now) || total < 1 {
@@ -104,36 +111,83 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 			return err
 		}
 
-		var id string
-		if err := tx.QueryRow(ctx, `INSERT INTO payment_attempts
+		result, err = scanAttempt(tx.QueryRow(ctx, `INSERT INTO payment_attempts
 			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest)
-			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7) RETURNING id`,
-			bookingID, actor, input.Method, total, expires, key, digest[:]).Scan(&id); err != nil {
+			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7) RETURNING `+attemptColumns,
+			bookingID, actor, input.Method, total, expires, key, digest[:]))
+		if err != nil {
 			return err
+		}
+		if status == "held" {
+			if err := setBookingStatus(ctx, tx, bookingID, status, "payment_pending", "payment attempt reserved"); err != nil {
+				return err
+			}
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return Attempt{}, false, err
+	}
+	if result.Status == "created" {
+		// The attempt and its order ID survive a lost provider response.
+		result, err = s.openAttempt(ctx, result.ID, bookingID, email)
+	}
+	return result, created && err == nil, err
+}
+
+func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (Attempt, error) {
+	var result Attempt
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		attempt, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE id = $1 AND booking_id = $2 FOR UPDATE`, id, bookingID))
+		if err != nil {
+			return err
+		}
+		if attempt.Status != "created" {
+			result = attempt
+			return nil
+		}
+		var eventName string
+		var remainingSeconds float64
+		err = tx.QueryRow(ctx, `SELECT e.name, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8
+			FROM bookings b JOIN events e ON e.id = b.event_id
+			WHERE b.id = $1 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID).
+			Scan(&eventName, &remainingSeconds)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotPayable
+		}
+		if err != nil {
+			return err
+		}
+		if remainingSeconds <= 0 {
+			return ErrNotPayable
 		}
 		name := eventName
 		if len([]rune(name)) > 50 {
 			name = string([]rune(name)[:50])
 		}
-		snap, err := s.Provider.CreateSnap(ctx, id, total, email,
-			[]snapItem{{ID: bookingID, Price: total, Quantity: 1, Name: "Sewa stand " + name}}, expires.Sub(now))
+		snap, err := s.Provider.CreateSnap(ctx, id, attempt.Amount, email,
+			[]snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: "Sewa stand " + name}},
+			time.Duration(remainingSeconds*float64(time.Second)))
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE payment_attempts SET status = 'pending', provider_token = $2,
-			checkout_url = $3, updated_at = clock_timestamp() WHERE id = $1`, id, snap.Token, snap.RedirectURL); err != nil {
+		var payable bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM bookings b JOIN events e ON e.id = b.event_id
+			WHERE b.id = $1 AND b.status = 'payment_pending' AND b.expires_at > clock_timestamp()
+				AND e.status IN ('published', 'live')
+		)`, bookingID).Scan(&payable); err != nil {
 			return err
 		}
-		if status == "held" {
-			if err := setBookingStatus(ctx, tx, bookingID, status, "payment_pending", "payment attempt opened"); err != nil {
-				return err
-			}
+		if !payable {
+			return ErrNotPayable
 		}
-		result, err = scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts WHERE id = $1`, id))
-		created = true
+		result, err = scanAttempt(tx.QueryRow(ctx, `UPDATE payment_attempts SET status = 'pending', provider_token = $2,
+			checkout_url = $3, updated_at = clock_timestamp() WHERE id = $1 RETURNING `+attemptColumns, id, snap.Token, snap.RedirectURL))
 		return err
 	})
-	return result, created, err
+	return result, err
 }
 
 func setBookingStatus(ctx context.Context, tx pgx.Tx, bookingID, from, to, reason string) error {
@@ -235,23 +289,30 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	}
 	var bookingStatus string
 	var rent, platformFee, providerFee int64
-	var live bool
-	if err := tx.QueryRow(ctx, `SELECT status, rent, platform_fee, provider_fee, expires_at > statement_timestamp()
-		FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).Scan(&bookingStatus, &rent, &platformFee, &providerFee, &live); err != nil {
+	var expires, now time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, rent, platform_fee, provider_fee, expires_at
+		FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).Scan(&bookingStatus, &rent, &platformFee, &providerFee, &expires); err != nil {
+		return "", err
+	}
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return "", err
 	}
 	switch {
 	case bookingStatus == "confirmed":
 		return "applied", exception("duplicate_payment", &attemptID, &bookingID, map[string]any{"amount": amount})
-	case (bookingStatus != "held" && bookingStatus != "payment_pending") || !live:
+	case (bookingStatus != "held" && bookingStatus != "payment_pending") || !expires.After(now):
 		return "applied", exception("late_payment", &attemptID, &bookingID,
 			map[string]any{"amount": amount, "booking_status": bookingStatus})
 	}
 	if err := setBookingStatus(ctx, tx, bookingID, bookingStatus, "confirmed", "payment settled"); err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status = 'hold'`, bookingID); err != nil {
+	tag, err := tx.Exec(ctx, `UPDATE allocations SET status = 'reserved' WHERE booking_id = $1 AND status = 'hold'`, bookingID)
+	if err != nil {
 		return "", err
+	}
+	if tag.RowsAffected() != 1 {
+		return "", errors.New("payment confirmation requires a held allocation")
 	}
 	return "applied", recordPayment(ctx, tx, attemptID, amount, rent, platformFee, providerFee)
 }

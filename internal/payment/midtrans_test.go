@@ -15,6 +15,28 @@ func sign(n Notification, key string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func TestStatus(t *testing.T) {
+	orderID := "590c5927-511a-4dc0-9b8d-ec7795d94db4"
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, pass, ok := r.BasicAuth(); !ok || user != testKey || pass != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/"+orderID+"/status" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"order_id":"` + orderID + `","transaction_status":"settlement","status_code":"200","gross_amount":"45000.00","currency":"IDR","signature_key":"omitted-from-audit"}`))
+	}))
+	defer provider.Close()
+	m := NewMidtrans(testKey, "sandbox")
+	m.StatusURL = provider.URL
+	n, err := m.Status(context.Background(), orderID)
+	if err != nil || n.OrderID != orderID || n.TransactionStatus != "settlement" || n.SignatureKey != "" {
+		t.Fatalf("verified status %+v: %v", n, err)
+	}
+}
+
 func TestValidSignature(t *testing.T) {
 	m := NewMidtrans("Mid-server-test", "sandbox")
 	n := Notification{OrderID: "o-1", StatusCode: "200", GrossAmount: "150000.00"}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,9 +19,16 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	bookingstore "kitakarsa.com/tenantku/backend/internal/booking"
 )
 
 const testKey = "Mid-server-test"
+
+type snapTransport func(*http.Request) (*http.Response, error)
+
+func (transport snapTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return transport(req)
+}
 
 func migratedStore(t *testing.T, ctx context.Context) Store {
 	t.Helper()
@@ -60,6 +68,10 @@ func migratedStore(t *testing.T, ctx context.Context) Store {
 		if !strings.HasSuffix(f.Name(), ".up.sql") {
 			continue
 		}
+		// This deployment function is bound to public, while the fixture uses its own schema.
+		if f.Name() == "00013_cancel_unpaid_event_bookings.up.sql" {
+			continue
+		}
 		sql, err := os.ReadFile(filepath.Join("../../migrations", f.Name()))
 		if err != nil {
 			t.Fatal(err)
@@ -91,6 +103,10 @@ func count(t *testing.T, ctx context.Context, s Store, query string, args ...any
 
 func seedBooking(t *testing.T, ctx context.Context, s Store, user, business, category, event, slot string, stand string) string {
 	t.Helper()
+	if _, err := s.DB.Exec(ctx, `INSERT INTO stands (id, event_id, code, x, y, width, height)
+		VALUES ($1::uuid, $2, right($1::uuid::text, 4), right($1::uuid::text, 1)::int, 0, 1, 1)`, stand, event); err != nil {
+		t.Fatal(err)
+	}
 	id := one(t, ctx, s, `INSERT INTO bookings (business_id, event_id, category_id, created_by, status, expires_at,
 		price_revision, rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version, refund_policy_snapshot)
 		VALUES ($1, $2, $3, $4, 'held', now() + interval '15 minutes', 1, 30000, 1000, 500, 't', 'v1', '{}') RETURNING id`,
@@ -134,6 +150,10 @@ func TestPaymentLifecycle(t *testing.T) {
 	event := one(t, ctx, s, `INSERT INTO events (organization_id, created_by, name, slug, status, starts_at, ends_at,
 		timezone, city, address, terms) VALUES ($1, $2, 'E', 'e', 'published', now(), now() + interval '2 hours',
 		'Asia/Jakarta', 'Banda Aceh', 'St', 'T') RETURNING id`, org, user)
+	if _, err := s.DB.Exec(ctx, `INSERT INTO event_layouts (event_id, revision, width, height, cell_meters, updated_by)
+		VALUES ($1, 1, 8, 8, 1, $2)`, event, user); err != nil {
+		t.Fatal(err)
+	}
 	slot := one(t, ctx, s, `INSERT INTO event_slots (event_id, code, starts_at, ends_at)
 		SELECT id, 'whole', starts_at, ends_at FROM events WHERE id = $1 RETURNING id`, event)
 	if _, err := s.DB.Exec(ctx, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
@@ -215,15 +235,28 @@ func TestPaymentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(ctx, `UPDATE bookings SET status = 'expired', expires_at = now() - interval '1 minute' WHERE id = $1`, expired); err != nil {
+	if _, err := s.DB.Exec(ctx, `UPDATE bookings SET expires_at = now() - interval '1 minute' WHERE id = $1`, expired); err != nil {
 		t.Fatal(err)
 	}
 	n, raw = notify(late.ID, "settlement", "200", "31500.00")
+	expiryWorker := bookingstore.Store{DB: s.DB}
+	expiry := make(chan error, 1)
+	go func() {
+		_, err := expiryWorker.Expire(ctx, 100)
+		expiry <- err
+	}()
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
 		t.Fatal(err)
 	}
+	if err := <-expiry; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := expiryWorker.Expire(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, expired); got != "expired" ||
-		count(t, ctx, s, `SELECT count(*) FROM payment_exceptions WHERE kind = 'late_payment'`) != 1 {
+		count(t, ctx, s, `SELECT count(*) FROM payment_exceptions WHERE kind = 'late_payment'`) != 1 ||
+		one(t, ctx, s, `SELECT status FROM allocations WHERE booking_id = $1`, expired) != "released" {
 		t.Fatalf("late payment: booking %s", got)
 	}
 
@@ -243,6 +276,35 @@ func TestPaymentLifecycle(t *testing.T) {
 	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "snap"})
 	if err != nil || !created || next.ID == failing.ID {
 		t.Fatalf("retry attempt %+v %v", next, err)
+	}
+
+	// The provider can receive a request even when its response is lost.
+	timeout := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000004")
+	var orders []string
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		defer req.Body.Close()
+		var input snapRequest
+		if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
+			return nil, err
+		}
+		orders = append(orders, input.TransactionDetails.OrderID)
+		if len(orders) == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return &http.Response{StatusCode: http.StatusCreated,
+			Body: io.NopCloser(strings.NewReader(`{"token":"recovered","redirect_url":"https://pay.example/recovered"}`))}, nil
+	})}
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"}); !errors.Is(err, ErrProvider) {
+		t.Fatalf("expected provider timeout, got %v", err)
+	}
+	reserved := one(t, ctx, s, `SELECT id FROM payment_attempts WHERE booking_id = $1 AND status = 'created'`, timeout)
+	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"})
+	if err != nil || created || recovered.ID != reserved || recovered.Status != "pending" || recovered.CheckoutURL == "" {
+		t.Fatalf("timeout recovery %+v created=%v err=%v", recovered, created, err)
+	}
+	if len(orders) != 2 || orders[0] != reserved || orders[1] != reserved ||
+		count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE booking_id = $1`, timeout) != 1 {
+		t.Fatalf("timeout created distinct payment attempts: %v", orders)
 	}
 
 	// Unknown orders are stored and flagged, not errors (so the provider stops retrying).

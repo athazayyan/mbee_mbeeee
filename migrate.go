@@ -74,6 +74,12 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 			)`); err != nil {
 			return err
 		}
+		if err := relocateMigration(ctx, tx, 9, "00009_payments.up.sql", 16, "00016_payments.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 10, "00010_catalog.up.sql", 12, "00012_catalog.up.sql"); err != nil {
+			return err
+		}
 
 		previous := 0
 		for _, file := range files {
@@ -133,6 +139,18 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		return nil
 	})
 	return applied, err
+}
+
+// Relocate an exact migration that was already applied under a colliding version.
+func relocateMigration(ctx context.Context, tx pgx.Tx, oldVersion int, oldName string, version int, name string) error {
+	content, err := migrations.ReadFile("migrations/" + name)
+	if err != nil {
+		return err
+	}
+	checksum := fmt.Sprintf("%x", sha256.Sum256(content))
+	_, err = tx.Exec(ctx, `UPDATE schema_migrations SET version = $1, name = $2
+		WHERE version = $3 AND name = $4 AND checksum = $5`, version, name, oldVersion, oldName, checksum)
+	return err
 }
 
 // The account-recovery branch used a name-only ledger before joining the versioned runner.

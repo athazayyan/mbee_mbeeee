@@ -109,11 +109,9 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 		if err != nil {
 			return err
 		}
-		if value.Status != "draft" {
-			return errDraftRequired
-		}
-		if _, err := s.validatePriceReferences(ctx, tx, id, input.priceRules, "", ""); err != nil {
-			return err
+		published := value.Status == "published" || value.Status == "live"
+		if value.Status != "draft" && !published {
+			return errPricingClosed
 		}
 		var now time.Time
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
@@ -126,6 +124,26 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 				return fieldErrors{"effective_at": "Pilih waktu mulai yang akan datang dan sebelum acara selesai."}
 			}
 		}
+		if published {
+			if !effective.Before(value.EndsAt) {
+				return errPricingClosed
+			}
+			if err := retainPublishedQuotas(ctx, tx, id, effective, &input.priceRules); err != nil {
+				return err
+			}
+		}
+		if _, err := s.validatePriceReferences(ctx, tx, id, input.priceRules, "", ""); err != nil {
+			return err
+		}
+		if published {
+			slots, err := pricingSlots(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if !coversOpenSlots(input.priceRules, slots, effective) {
+				return fieldErrors{"pricing": "Tetapkan harga untuk setiap slot yang masih tersedia saat versi mulai berlaku."}
+			}
+		}
 		saved, err = loadPriceVersion(ctx, tx, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
 			SELECT $1, COALESCE(MAX(revision), 0) + 1, $2, $3, $4 FROM event_pricing_versions WHERE event_id = $1
 			RETURNING event_id, revision::text, effective_at, rules`, id, account.ID, input.priceRules, effective)
@@ -136,6 +154,33 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 		return
 	}
 	httpapi.Success(c, http.StatusOK, saved)
+}
+
+var errPricingClosed = errors.New("event pricing can no longer be changed")
+
+func retainPublishedQuotas(ctx context.Context, tx pgx.Tx, eventID string, at time.Time, rules *priceRules) error {
+	previous, err := loadPriceVersion(ctx, tx, activePricingQuery, eventID, at)
+	if err != nil {
+		return err
+	}
+	var existing []categoryQuota
+	if previous != nil {
+		existing = previous.Rules.CategoryQuotas
+	}
+	if rules.CategoryQuotas != nil {
+		caps := make(map[[2]string]*int32, len(existing))
+		for _, quota := range existing {
+			caps[[2]string{quota.CategoryID, quota.BlockID}] = quota.Cap
+		}
+		if len(rules.CategoryQuotas) != len(existing) || slices.ContainsFunc(rules.CategoryQuotas, func(quota categoryQuota) bool {
+			cap := caps[[2]string{quota.CategoryID, quota.BlockID}]
+			return cap == nil || *cap != *quota.Cap
+		}) {
+			return fieldErrors{"category_quotas": "Kuota kategori acara terbit mengikuti aturan yang sudah berlaku."}
+		}
+	}
+	rules.CategoryQuotas = existing
+	return nil
 }
 
 func (s Store) previewPrice(c *gin.Context, account auth.Account) {

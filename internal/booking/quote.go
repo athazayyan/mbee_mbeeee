@@ -19,13 +19,26 @@ type holdQuoteInput struct {
 
 type holdQuote struct {
 	holdQuoteInput
-	EventName     string    `json:"event_name"`
-	EventTerms    string    `json:"event_terms"`
-	PolicyVersion string    `json:"refund_policy_version"`
-	RefundTerms   string    `json:"refund_terms"`
-	Price         Price     `json:"price"`
-	ServerNow     time.Time `json:"-"`
+	EventName       string    `json:"event_name"`
+	EventCity       string    `json:"event_city"`
+	EventAddress    string    `json:"event_address"`
+	EventTimezone   string    `json:"event_timezone"`
+	SlotStartsAt    time.Time `json:"slot_starts_at"`
+	SlotEndsAt      time.Time `json:"slot_ends_at"`
+	EventRevisionID string    `json:"event_revision_id,omitempty"`
+	StandCode       string    `json:"stand_code,omitempty"`
+	BlockLabel      string    `json:"block_label,omitempty"`
+	EventTerms      string    `json:"event_terms"`
+	PolicyVersion   string    `json:"refund_policy_version"`
+	RefundTerms     string    `json:"refund_terms"`
+	Price           Price     `json:"price"`
+	ServerNow       time.Time `json:"-"`
 }
+
+const currentEventRevisionSQL = `COALESCE((
+	SELECT revision_id::text FROM event_revision_applications
+	WHERE event_id = $1 ORDER BY supersedes_through DESC LIMIT 1
+), '')`
 
 func (s Store) quoteHold(ctx context.Context, actor string, input holdQuoteInput, source OfferSource) (holdQuote, error) {
 	if !httpapi.ValidID(actor) || !normalizeHoldIDs(&input.BusinessID, &input.EventID, &input.StandID, &input.EventSlotID) {
@@ -40,15 +53,16 @@ func (s Store) quoteHold(ctx context.Context, actor string, input holdQuoteInput
 			return err
 		}
 		var terms *string
-		var ends time.Time
-		err = tx.QueryRow(ctx, `SELECT e.name, e.terms, slot.ends_at, transaction_timestamp()
+		err = tx.QueryRow(ctx, `SELECT e.name, e.terms, e.city, e.address, e.timezone, slot.starts_at, slot.ends_at,
+			transaction_timestamp(), `+currentEventRevisionSQL+`
 			FROM events e JOIN event_slots slot ON slot.event_id = e.id
 			WHERE e.id = $1 AND slot.id = $2 AND e.status IN ('published', 'live')`, input.EventID, input.EventSlotID).
-			Scan(&result.EventName, &terms, &ends, &result.ServerNow)
+			Scan(&result.EventName, &terms, &result.EventCity, &result.EventAddress, &result.EventTimezone,
+				&result.SlotStartsAt, &result.SlotEndsAt, &result.ServerNow, &result.EventRevisionID)
 		if err != nil {
 			return err
 		}
-		if terms == nil || strings.TrimSpace(*terms) == "" || !ends.After(result.ServerNow) {
+		if terms == nil || strings.TrimSpace(*terms) == "" || !result.SlotEndsAt.After(result.ServerNow) {
 			return ErrNotBookable
 		}
 		offer, err := source.ResolveOffer(ctx, tx, OfferRequest{
@@ -76,6 +90,7 @@ func (s Store) quoteHold(ctx context.Context, actor string, input holdQuoteInput
 			return ErrHoldUnavailable
 		}
 		result.EventTerms, result.PolicyVersion, result.RefundTerms = *terms, offer.PolicyVersion, offer.RefundTerms
+		result.StandCode, result.BlockLabel = offer.StandCode, offer.BlockLabel
 		result.Price, err = priceFromOffer(offer)
 		return err
 	})

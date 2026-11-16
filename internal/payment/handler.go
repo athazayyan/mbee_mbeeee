@@ -1,12 +1,12 @@
 package payment
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 
-	"encoding/json"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"kitakarsa.com/tenantku/backend/internal/auth"
@@ -79,7 +79,7 @@ func (s Store) webhook(c *gin.Context) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10))
 	var n Notification
-	if err != nil || json.Unmarshal(raw, &n) != nil || n.OrderID == "" || n.SignatureKey == "" {
+	if err != nil || json.Unmarshal(raw, &n) != nil || !httpapi.ValidID(n.OrderID) || n.SignatureKey == "" {
 		httpapi.Error(c, http.StatusBadRequest, "INVALID_WEBHOOK", "Payload webhook tidak valid.", nil)
 		return
 	}
@@ -87,7 +87,18 @@ func (s Store) webhook(c *gin.Context) {
 		httpapi.Error(c, http.StatusUnauthorized, "INVALID_SIGNATURE", "Tanda tangan tidak valid.", nil)
 		return
 	}
-	if err := s.ApplyNotification(c.Request.Context(), n, raw); err != nil {
+	verified, err := s.Provider.Status(c.Request.Context(), n.OrderID)
+	if err != nil {
+		httpapi.LogInternalError(c, "payment status verification failed", err)
+		httpapi.Error(c, http.StatusServiceUnavailable, "PAYMENT_PROVIDER_UNAVAILABLE", "Status pembayaran belum dapat diverifikasi.", nil)
+		return
+	}
+	payload, err := json.Marshal(verified)
+	if err != nil {
+		httpapi.Error(c, http.StatusServiceUnavailable, "PAYMENT_UNAVAILABLE", "Webhook belum dapat diproses.", nil)
+		return
+	}
+	if err := s.ApplyNotification(c.Request.Context(), verified, payload); err != nil {
 		httpapi.LogInternalError(c, "payment webhook failed", err)
 		httpapi.Error(c, http.StatusServiceUnavailable, "PAYMENT_UNAVAILABLE", "Webhook belum dapat diproses.", nil)
 		return

@@ -64,7 +64,10 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/organizations/:id/events/:event_id", sessions.WithAccount(s.getEvent))
 	api.GET("/organizations/:id/event-history", sessions.WithAccount(s.listHistoricalEvents))
 	api.GET("/events/:id/pricing", sessions.WithAccount(s.getPricing))
-	api.GET("/events/:id/revisions", sessions.WithAccount(s.listRevisions))
+	api.GET("/events", s.listPublicEvents)
+	api.GET("/events/:id", s.getPublicEvent)
+	api.GET("/events/:id/layout", s.getPublicLayout)
+	api.GET("/organizations/:id/events/:event_id/layout", sessions.WithAccount(s.getOrganizerLayout))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -76,7 +79,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.POST("/events/:id/cancel", sessions.WithAccount(s.cancelEvent))
 	mutations.PUT("/events/:id/pricing", sessions.WithAccount(s.replacePricing))
 	mutations.POST("/events/:id/pricing/preview", sessions.WithAccount(s.previewPrice))
-	mutations.POST("/events/:id/revisions", sessions.WithAccount(s.proposeRevision))
+	mutations.PUT("/events/:id/layout", sessions.WithAccount(s.replaceLayout))
 }
 
 func (s Store) listEvents(c *gin.Context, account auth.Account) {
@@ -265,6 +268,9 @@ func writeEvent(c *gin.Context, status int, data event, err error) {
 }
 
 func writeError(c *gin.Context, err error) {
+	if writeLayoutError(c, err) {
+		return
+	}
 	var fields fieldErrors
 	var dbError *pgconn.PgError
 	switch {
@@ -274,8 +280,10 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Acara atau organisasi tidak ditemukan.", nil)
 	case errors.Is(err, errDraftRequired):
 		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_DRAFT", "Aksi ini hanya tersedia pada draft acara.", nil)
+	case errors.Is(err, errPricingClosed):
+		httpapi.Error(c, http.StatusConflict, "EVENT_PRICING_CLOSED", "Harga acara sudah tidak dapat diubah.", nil)
 	case errors.Is(err, errRevisionRequired):
-		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Perubahan material perlu diajukan sebagai revisi karena acara memiliki booking aktif.", nil)
+		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_REQUIRED", "Jadwal, lokasi, dan perubahan material lainnya dikunci saat acara memiliki booking aktif.", nil)
 	case errors.Is(err, errRevisionUnavailable):
 		httpapi.Error(c, http.StatusConflict, "EVENT_REVISION_UNAVAILABLE", "Revisi tersedia untuk acara terbit atau berlangsung yang memiliki booking aktif.", nil)
 	case errors.Is(err, errIdempotencyKeyMismatch):

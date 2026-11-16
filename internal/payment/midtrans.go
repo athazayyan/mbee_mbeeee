@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	sandboxSnapURL = "https://app.sandbox.midtrans.com/snap/v1/transactions"
-	liveSnapURL    = "https://app.midtrans.com/snap/v1/transactions"
+	sandboxSnapURL   = "https://app.sandbox.midtrans.com/snap/v1/transactions"
+	liveSnapURL      = "https://app.midtrans.com/snap/v1/transactions"
+	sandboxStatusURL = "https://api.sandbox.midtrans.com/v2"
+	liveStatusURL    = "https://api.midtrans.com/v2"
 )
 
 var ErrProvider = errors.New("payment provider request failed")
@@ -27,6 +29,7 @@ var ErrProvider = errors.New("payment provider request failed")
 type Midtrans struct {
 	ServerKey string
 	SnapURL   string
+	StatusURL string
 	HTTP      *http.Client
 }
 
@@ -35,11 +38,11 @@ func NewMidtrans(serverKey, env string) *Midtrans {
 	if serverKey == "" {
 		return nil
 	}
-	url := sandboxSnapURL
+	url, statusURL := sandboxSnapURL, sandboxStatusURL
 	if env == "production" {
-		url = liveSnapURL
+		url, statusURL = liveSnapURL, liveStatusURL
 	}
-	return &Midtrans{ServerKey: serverKey, SnapURL: url, HTTP: &http.Client{Timeout: 10 * time.Second}}
+	return &Midtrans{ServerKey: serverKey, SnapURL: url, StatusURL: statusURL, HTTP: &http.Client{Timeout: 10 * time.Second}}
 }
 
 type snapRequest struct {
@@ -115,6 +118,37 @@ type Notification struct {
 	FraudStatus       string `json:"fraud_status"`
 	TransactionID     string `json:"transaction_id"`
 	Currency          string `json:"currency"`
+}
+
+// Status verifies the transaction state with Midtrans after a signed notification.
+func (m *Midtrans) Status(ctx context.Context, orderID string) (Notification, error) {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.StatusURL+"/"+orderID+"/status", nil)
+	if err != nil {
+		return Notification{}, ErrProvider
+	}
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(m.ServerKey, "")
+	res, err := m.HTTP.Do(req)
+	if err != nil {
+		return Notification{}, ErrProvider
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return Notification{}, fmt.Errorf("%w: status lookup returned HTTP %d", ErrProvider, res.StatusCode)
+	}
+	var n Notification
+	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&n); err != nil ||
+		n.OrderID != orderID || n.TransactionStatus == "" {
+		return Notification{}, ErrProvider
+	}
+	if outcome, _ := n.outcome(); outcome == "paid" &&
+		(n.StatusCode != "200" || n.Currency != "IDR" || (n.FraudStatus != "" && n.FraudStatus != "accept")) {
+		return Notification{}, ErrProvider
+	}
+	n.SignatureKey = ""
+	return n, nil
 }
 
 // ValidSignature checks SHA512(order_id + status_code + gross_amount + server_key).

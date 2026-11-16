@@ -75,6 +75,8 @@ func writeHoldError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "REFUND_POLICY_CHANGED", "Muat ulang dan tinjau kebijakan refund terbaru.", nil)
 	case errors.Is(err, ErrHoldPriceChanged):
 		httpapi.Error(c, http.StatusConflict, "HOLD_PRICE_CHANGED", "Harga berubah. Tinjau lagi rincian biaya sebelum membuat hold.", nil)
+	case errors.Is(err, ErrEventDetailsChanged):
+		httpapi.Error(c, http.StatusConflict, "EVENT_DETAILS_CHANGED", "Acara berubah. Tinjau lagi jadwal, lokasi, dan syarat sebelum membuat hold.", nil)
 	case errors.Is(err, ErrHoldLimit):
 		httpapi.Error(c, http.StatusTooManyRequests, "HOLD_LIMIT_REACHED", "Batas hold aktif tercapai.", nil)
 	case errors.Is(err, ErrHoldUnavailable):
@@ -119,7 +121,13 @@ func (s Store) listBookings(c *gin.Context, account auth.Account) {
 	if id != "" {
 		beforeID = &id
 	}
-	bookings, now, err := s.list(c.Request.Context(), account.ID, business, before, beforeID, limit+1)
+	filter := c.Query("needs_revision_response")
+	if filter != "" && filter != "true" && filter != "false" {
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Parameter tidak valid.",
+			map[string]string{"needs_revision_response": "Gunakan true atau false."})
+		return
+	}
+	bookings, now, err := s.list(c.Request.Context(), account.ID, business, before, beforeID, limit+1, filter == "true")
 	if err != nil {
 		writeReadError(c, err)
 		return
