@@ -107,8 +107,8 @@ func writeLayoutError(c *gin.Context, err error) bool {
 			"Denah acara yang sudah selesai atau dibatalkan tidak bisa diubah.", nil)
 	case errors.As(err, &reserved):
 		httpapi.Error(c, http.StatusConflict, "STAND_HAS_BOOKING",
-			"Stand "+reserved.code+" memiliki booking aktif sehingga tidak bisa dihapus, dipindah, atau dinonaktifkan.",
-			map[string]string{"stands": "Ajukan revisi acara untuk mengubah stand yang sudah dipesan."})
+			"Stand "+reserved.code+" memiliki alokasi aktif. Kode, blok, posisi, dan ukuran stand dikunci.",
+			map[string]string{"stands": "Pertahankan stand dengan alokasi aktif beserta kode, blok, posisi, ukuran, dan status aktifnya."})
 	default:
 		return false
 	}
