@@ -75,6 +75,18 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if host := os.Getenv("SMTP_HOST"); host != "" {
+			mailer, err := auth.NewSMTPMailer(auth.SMTPConfig{
+				Host: host, Port: os.Getenv("SMTP_PORT"), User: os.Getenv("SMTP_USER"), Password: os.Getenv("SMTP_PASS"),
+				From: os.Getenv("MAIL_FROM"), AppOrigin: origin,
+			})
+			if err != nil {
+				log.Printf("SMTP disabled, emails are only written to the log: %v", err)
+			} else {
+				service.UseMailer(mailer)
+				log.Printf("Email: sending through SMTP %s", host)
+			}
+		}
 		service.Routes(api, origin)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)

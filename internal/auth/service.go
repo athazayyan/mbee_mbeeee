@@ -29,6 +29,7 @@ type Service struct {
 	pepper    []byte
 	dummyHash []byte
 	mailer    Mailer
+	mailerSet bool
 }
 
 func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, error) {
@@ -44,6 +45,11 @@ func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, e
 		return nil, err
 	}
 	return &Service{store: store, key: []byte(key), pepper: []byte(pepper), dummyHash: dummyHash, mailer: NewLogMailer("http://localhost:3001")}, nil
+}
+
+// UseMailer replaces the default log-only mailer. Call before Routes.
+func (s *Service) UseMailer(m Mailer) {
+	s.mailer, s.mailerSet = m, true
 }
 
 func (s *Service) Ready(ctx context.Context) error {

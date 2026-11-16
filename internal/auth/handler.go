@@ -28,7 +28,9 @@ type handler struct {
 }
 
 func (s *Service) Routes(api *gin.RouterGroup, origin string) {
-	s.mailer = NewLogMailer(origin)
+	if !s.mailerSet {
+		s.mailer = NewLogMailer(origin)
+	}
 	h := handler{service: s, origin: origin, secure: strings.HasPrefix(origin, "https://")}
 	group := api.Group("/auth", h.checkOrigin, limitMutations())
 	group.POST("/register", h.register)
