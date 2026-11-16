@@ -32,6 +32,15 @@ type publicEvent struct {
 	MinRent          *int64    `json:"min_rent,omitempty"`
 	MaxRent          *int64    `json:"max_rent,omitempty"`
 	Capacity         *int32    `json:"capacity,omitempty"`
+	// Slots hanya diisi pada detail acara; tenant memilih slot sebelum meminta hold.
+	Slots []publicSlot `json:"slots,omitempty"`
+}
+
+type publicSlot struct {
+	ID       string    `json:"id"`
+	Code     string    `json:"code"`
+	StartsAt time.Time `json:"starts_at"`
+	EndsAt   time.Time `json:"ends_at"`
 }
 
 type catalogFilter struct {
@@ -117,6 +126,15 @@ func (s Store) getPublic(ctx context.Context, id string) (publicEvent, error) {
 		result, err = scanPublicEvent(tx.QueryRow(ctx, `SELECT `+publicEventColumns+` FROM events e
 			JOIN organizations o ON o.id = e.organization_id
 			WHERE e.id = $1 AND e.status = ANY($2::text[])`, id, catalogPublicStatuses))
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text, code, starts_at, ends_at FROM event_slots
+			WHERE event_id = $1 ORDER BY starts_at, id`, id)
+		if err != nil {
+			return err
+		}
+		result.Slots, err = pgx.CollectRows(rows, pgx.RowToStructByPos[publicSlot])
 		if err != nil {
 			return err
 		}
