@@ -3,11 +3,20 @@ package httpapi
 import (
 	"crypto/rand"
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 const requestIDKey = "request_id"
+
+func RequireOrigin(origin string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetHeader("Origin") != origin {
+			Error(c, http.StatusForbidden, "ORIGIN_REJECTED", "Origin tidak diizinkan.", nil)
+		}
+	}
+}
 
 func RequestID(c *gin.Context) {
 	var id [16]byte

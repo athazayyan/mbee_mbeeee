@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,10 +18,14 @@ import (
 	"github.com/joho/godotenv"
 	apidocs "kitakarsa.com/tenantku/backend/api"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/booking"
+	"kitakarsa.com/tenantku/backend/internal/events"
+	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Fatal("could not load .env")
 	}
@@ -27,6 +34,12 @@ func main() {
 	defer stop()
 	if len(os.Args) == 2 && os.Args[1] == "migrate" {
 		if err := migrate(ctx); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "worker" {
+		if err := runWorker(ctx, os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -43,7 +56,8 @@ func run(ctx context.Context) error {
 		port = "8080"
 	}
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(httpapi.RequestID, httpapi.LogRequests, gin.CustomRecoveryWithWriter(io.Discard, httpapi.RecoverRequest))
 	if os.Getenv("API_DOCS_ENABLED") == "true" {
 		apidocs.Routes(router)
 	}
@@ -55,7 +69,7 @@ func run(ctx context.Context) error {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	api := router.Group("/api/v1", httpapi.RequestID, func(c *gin.Context) {
+	api := router.Group("/api/v1", func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 	})
 	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
@@ -71,6 +85,26 @@ func run(ctx context.Context) error {
 		}
 		defer pool.Close()
 		service, err := auth.New(startup, pool, os.Getenv("JWT_SIGNING_KEY"), os.Getenv("REFRESH_TOKEN_PEPPER"))
+		if err != nil {
+			cancel()
+			return err
+		}
+		profiles := identity.Store{DB: pool}
+		eventStore := events.Store{DB: pool}
+		bookings := booking.Store{DB: pool}
+		checkSchema := func(probe context.Context) error {
+			if err := profiles.Ready(probe); err != nil {
+				return fmt.Errorf("identity schema unavailable; run make migrate: %w", err)
+			}
+			if err := eventStore.Ready(probe); err != nil {
+				return fmt.Errorf("event schema unavailable; run make migrate: %w", err)
+			}
+			if err := bookings.Ready(probe); err != nil {
+				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
+			}
+			return nil
+		}
+		err = checkSchema(startup)
 		cancel()
 		if err != nil {
 			return err
@@ -81,17 +115,18 @@ func run(ctx context.Context) error {
 				From: os.Getenv("MAIL_FROM"), AppOrigin: origin,
 			})
 			if err != nil {
-				log.Printf("SMTP disabled, emails are only written to the log: %v", err)
-			} else {
-				service.UseMailer(mailer)
-				log.Printf("Email: sending through SMTP %s", host)
+				return err
 			}
+			service.UseMailer(mailer)
 		}
 		service.Routes(api, origin)
+		profiles.Routes(api, service, origin)
+		eventStore.Routes(api, service, origin)
+		bookings.Routes(api, service)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
-			if service.Ready(probe) != nil {
+			if service.Ready(probe) != nil || checkSchema(probe) != nil {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
 				return
 			}
@@ -112,7 +147,9 @@ func run(ctx context.Context) error {
 		api.POST("/auth/reset-password", unavailable)
 		api.POST("/auth/verify-email", unavailable)
 		api.POST("/auth/resend-verification", unavailable)
-		api.GET("/me", unavailable)
+		identity.Store{}.Routes(api, nil, "")
+		events.Store{}.Routes(api, nil, "")
+		booking.Store{}.Routes(api, nil)
 	}
 
 	server := &http.Server{

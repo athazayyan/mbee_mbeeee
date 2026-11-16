@@ -1,11 +1,11 @@
 # TenantKu Backend
 
-Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan saat ini mencakup akun dan sesi, health check, serta kontrak OpenAPI yang dapat dibuka melalui Scalar.
+Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan saat ini mencakup akun, profil usaha dan organisasi, draft acara, aturan harga, pembacaan booking, serta kontrak OpenAPI yang dapat dibuka melalui Scalar.
 
 ## Prasyarat
 
 - Go 1.26.10 sesuai `go.mod`, `make`, dan `openssl`.
-- PostgreSQL untuk development. Workflow CI menggunakan PostgreSQL 17.
+- PostgreSQL untuk development. Contoh setup di bawah menggunakan PostgreSQL 17.
 - Frontend TenantKu untuk mencoba alur akun dari browser. Ikuti [README Frontend](https://github.com/M-Aidil-Fitrah/mbee_fe/blob/aidil/README.md).
 
 ## Setup lokal
@@ -40,20 +40,49 @@ Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan sa
 
    Kedua secret harus berbeda dan panjang masing-masing minimal 32 byte. `APP_ORIGIN` harus cocok dengan URL aplikasi FE di browser, yaitu `http://localhost:3001` pada setup bawaan. Tulis origin tanpa path atau garis miring penutup.
 
-4. Setelah PostgreSQL siap, jalankan migration sekali per database baru, kemudian nyalakan API.
+4. Setelah PostgreSQL siap, terapkan migration yang belum tercatat, kemudian nyalakan API.
 
    ```bash
    make migrate && go run .
    ```
 
-   `make migrate` dan `go run .` membaca `.env` dari root repo. Variabel yang sudah ada di environment memiliki prioritas. Setelah migration berhasil, cukup jalankan `go run .` untuk menyalakan API lagi.
+   `make migrate` dan `go run .` membaca `.env` dari root repo. Variabel yang sudah ada di environment memiliki prioritas. Jalankan kembali `make migrate` setelah mengambil migration baru. Runner melewati versi yang sudah tercatat dan mengenali database yang sudah menjalankan migration akun awal.
+
+## Worker kedaluwarsa booking
+
+Setelah migration diterapkan, jalankan worker di terminal lain dari root repo.
+
+```bash
+go run . worker
+```
+
+Worker membaca `DATABASE_URL` dan memeriksa hold yang jatuh tempo setiap 5 detik. Untuk satu siklus pemrosesan, gunakan `go run . worker --once`. Pada deployment, jalankan `./tenantku worker` sebagai proses terpisah dari API. Log JSON worker memuat `job_id` saat booking dilepas atau terjadi kegagalan.
+
+Untuk memantau proses kontinu, set `WORKER_HEALTH_ADDR=127.0.0.1:8081` atau alamat internal yang dapat dijangkau pemantau. Worker menjawab `GET /readyz` dengan 200 setelah satu siklus expiry berhasil, termasuk saat antrean kosong. Jawaban menjadi 503 jika siklus terakhir gagal atau 25 detik berlalu sejak keberhasilan terakhir. `worker --once` memakai kode keluar proses sebagai hasil.
+
+## Hak akses PostgreSQL saat deployment
+
+Siapkan tiga akun di setiap database TenantKu. Akun migration memiliki database dan tabel. Akun API dan akun worker adalah akun login khusus layanan dengan hak akses dari `deploy/postgres/runtime.sql`. Simpan kredensial tiap akun di konfigurasi secret environment masing-masing.
+
+```bash
+go build -o tenantku .
+DATABASE_URL="$MIGRATION_DATABASE_URL" ./tenantku migrate
+PGSERVICE=tenantku-migration psql -X -v api_role=tenantku_api -v worker_role=tenantku_worker \
+  -f deploy/postgres/runtime.sql
+```
+
+Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `api_role` dan `worker_role` sesuai akun yang sudah dibuat. Jalankan skrip hanya pada database khusus TenantKu. Skrip menutup akses bawaan PostgreSQL untuk `PUBLIC` pada database tersebut dan menerapkan ulang hak akses kedua akun layanan setelah migration atau restore.
+
+Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
+
+Saat rilis mendaftarkan endpoint hold dengan sumber stand dan kebijakan yang aktif, tambahkan `-v booking_hold=true` pada perintah `psql` di atas. Parameter ini memberi role API izin menyimpan booking, alokasi, dan histori serta memproses expiry. Untuk rilis tanpa endpoint hold, jalankan kembali skrip dengan nilai bawaan `false` untuk mencabut grant tambahan tersebut.
 
 ## Verifikasi lokal
 
 | Endpoint | Hasil yang diharapkan |
 | --- | --- |
 | [GET /healthz](http://127.0.0.1:8080/healthz) | HTTP 200 dengan `{"status":"ok"}` |
-| [GET /readyz](http://127.0.0.1:8080/readyz) | HTTP 200 dengan `{"status":"ready"}` jika PostgreSQL dan tabel auth siap |
+| [GET /readyz](http://127.0.0.1:8080/readyz) | HTTP 200 dengan `{"status":"ready"}` jika PostgreSQL dan tabel aplikasi siap |
 | [GET /api-reference](http://127.0.0.1:8080/api-reference) | Scalar saat `API_DOCS_ENABLED=true` |
 | [GET /api/openapi.yaml](http://127.0.0.1:8080/api/openapi.yaml) | Dokumen OpenAPI saat `API_DOCS_ENABLED=true` |
 
@@ -67,7 +96,7 @@ Jika startup menampilkan `auth migration has not been applied`, periksa bahwa mi
 make check
 ```
 
-Perintah ini memeriksa format, menjalankan `go vet`, tes, dan build. Untuk tes integrasi sesi, siapkan database uji terpisah, isi `TENANTKU_TEST_DATABASE_URL`, dan terapkan migration sekali pada database uji sebelum menjalankan check.
+Perintah ini memeriksa format, menjalankan `go vet`, tes, dan build. Untuk tes integrasi sesi dan booking, siapkan database uji terpisah, isi `TENANTKU_TEST_DATABASE_URL`, dan terapkan migration sekali pada database uji sebelum menjalankan check. Tes booking membuat schema sementara di database uji.
 
 ```bash
 export TENANTKU_TEST_DATABASE_URL='postgres://user:password@localhost:5432/tenantku_test?sslmode=disable'

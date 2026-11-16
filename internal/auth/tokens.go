@@ -89,8 +89,14 @@ func (s *Service) createActionToken(ctx context.Context, userID, purpose string,
 
 // sendActionEmail issues a token and mails it. Mail failures are logged but not
 // returned, so the HTTP response never reveals whether an address is registered.
-func (s *Service) sendActionEmail(ctx context.Context, userID, email, purpose string, ttl time.Duration,
-	send func(context.Context, string, string) error) error {
+func (s *Service) sendActionEmail(ctx context.Context, userID, email, purpose string) error {
+	if s.mailer == nil {
+		return nil
+	}
+	ttl, send := verificationTTL, s.mailer.SendVerification
+	if purpose == purposePasswordReset {
+		ttl, send = resetTTL, s.mailer.SendPasswordReset
+	}
 	raw, hash, err := generateActionToken()
 	if err != nil {
 		return err
@@ -100,7 +106,7 @@ func (s *Service) sendActionEmail(ctx context.Context, userID, email, purpose st
 		return err
 	}
 	if err := send(ctx, email, raw); err != nil {
-		log.Printf("auth: send %s email failed: %v", purpose, err)
+		log.Printf("auth: send %s email failed", purpose)
 	}
 	return nil
 }
@@ -115,7 +121,33 @@ func (s *Service) forgotPassword(ctx context.Context, email string) error {
 		return err
 	}
 
-	return s.sendActionEmail(ctx, userID, email, purposePasswordReset, resetTTL, s.mailer.SendPasswordReset)
+	return s.sendActionEmail(ctx, userID, email, purposePasswordReset)
+}
+
+// Lock the account before its token, as issuance does. Recheck token state after waiting.
+func consumeActionToken(ctx context.Context, tx pgx.Tx, rawToken, purpose string) (string, error) {
+	hash := hashActionToken(rawToken)
+	var userID string
+	err := tx.QueryRow(ctx, `
+		SELECT u.id FROM users u JOIN auth_action_tokens t ON t.user_id = u.id
+		WHERE t.token_hash = $1 AND t.purpose = $2 AND t.used_at IS NULL AND t.expires_at > clock_timestamp()
+		FOR UPDATE OF u`, hash, purpose).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrInvalidOrExpiredToken
+	}
+	if err != nil {
+		return "", err
+	}
+	result, err := tx.Exec(ctx, `
+		UPDATE auth_action_tokens SET used_at = clock_timestamp()
+		WHERE token_hash = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > clock_timestamp()`, hash, purpose)
+	if err != nil {
+		return "", err
+	}
+	if result.RowsAffected() == 0 {
+		return "", ErrInvalidOrExpiredToken
+	}
+	return userID, nil
 }
 
 func (s *Service) resetPassword(ctx context.Context, rawToken, newPassword string) error {
@@ -130,20 +162,8 @@ func (s *Service) resetPassword(ctx context.Context, rawToken, newPassword strin
 	}
 	defer tx.Rollback(ctx)
 
-	var userID string
-	err = tx.QueryRow(ctx, `
-		UPDATE auth_action_tokens
-		SET used_at = now()
-		WHERE token_hash = $1
-		  AND purpose = $2
-		  AND used_at IS NULL
-		  AND expires_at > now()
-		RETURNING user_id::text
-	`, hashActionToken(rawToken), purposePasswordReset).Scan(&userID)
+	userID, err := consumeActionToken(ctx, tx, rawToken, purposePasswordReset)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrInvalidOrExpiredToken
-		}
 		return err
 	}
 
@@ -182,20 +202,8 @@ func (s *Service) verifyEmail(ctx context.Context, rawToken string) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var userID string
-	err = tx.QueryRow(ctx, `
-		UPDATE auth_action_tokens
-		SET used_at = now()
-		WHERE token_hash = $1
-		  AND purpose = $2
-		  AND used_at IS NULL
-		  AND expires_at > now()
-		RETURNING user_id::text
-	`, hashActionToken(rawToken), purposeEmailVerification).Scan(&userID)
+	userID, err := consumeActionToken(ctx, tx, rawToken, purposeEmailVerification)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrInvalidOrExpiredToken
-		}
 		return err
 	}
 
@@ -221,5 +229,5 @@ func (s *Service) resendVerification(ctx context.Context, email string) error {
 		return err
 	}
 
-	return s.sendActionEmail(ctx, userID, email, purposeEmailVerification, verificationTTL, s.mailer.SendVerification)
+	return s.sendActionEmail(ctx, userID, email, purposeEmailVerification)
 }

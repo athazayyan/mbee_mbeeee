@@ -29,7 +29,6 @@ type Service struct {
 	pepper    []byte
 	dummyHash []byte
 	mailer    Mailer
-	mailerSet bool
 }
 
 func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, error) {
@@ -44,12 +43,12 @@ func New(ctx context.Context, db *pgxpool.Pool, key, pepper string) (*Service, e
 	if err != nil {
 		return nil, err
 	}
-	return &Service{store: store, key: []byte(key), pepper: []byte(pepper), dummyHash: dummyHash, mailer: NewLogMailer("http://localhost:3001")}, nil
+	return &Service{store: store, key: []byte(key), pepper: []byte(pepper), dummyHash: dummyHash}, nil
 }
 
-// UseMailer replaces the default log-only mailer. Call before Routes.
+// UseMailer configures account email delivery. Call before Routes.
 func (s *Service) UseMailer(m Mailer) {
-	s.mailer, s.mailerSet = m, true
+	s.mailer = m
 }
 
 func (s *Service) Ready(ctx context.Context) error {
@@ -107,7 +106,7 @@ func (s *Service) register(ctx context.Context, email, password string) (Account
 	}
 	// Best effort: the account exists even if the first email cannot be issued;
 	// the user can request another one via resend-verification.
-	if err := s.sendActionEmail(ctx, account.ID, email, purposeEmailVerification, verificationTTL, s.mailer.SendVerification); err != nil {
+	if err := s.sendActionEmail(ctx, account.ID, email, purposeEmailVerification); err != nil {
 		log.Printf("auth: could not issue verification token: %v", err)
 	}
 	return account, nil
@@ -125,7 +124,10 @@ func (s *Service) login(ctx context.Context, email, password string) (Account, t
 	}
 	refresh := refreshToken()
 	expires := time.Now().Add(sessionTTL)
-	id, err := s.store.createSession(ctx, account.ID, expires, s.hashRefresh(refresh))
+	id, err := s.store.createSession(ctx, account.ID, expires, hash, s.hashRefresh(refresh))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Account{}, tokens{}, errSession
+	}
 	if err != nil {
 		return Account{}, tokens{}, err
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -23,16 +22,12 @@ const (
 
 type handler struct {
 	service *Service
-	origin  string
 	secure  bool
 }
 
 func (s *Service) Routes(api *gin.RouterGroup, origin string) {
-	if !s.mailerSet {
-		s.mailer = NewLogMailer(origin)
-	}
-	h := handler{service: s, origin: origin, secure: strings.HasPrefix(origin, "https://")}
-	group := api.Group("/auth", h.checkOrigin, limitMutations())
+	h := handler{service: s, secure: strings.HasPrefix(origin, "https://")}
+	group := api.Group("/auth", httpapi.RequireOrigin(origin), limitMutations())
 	group.POST("/register", h.register)
 	group.POST("/login", h.login)
 	group.POST("/refresh", h.refresh)
@@ -41,13 +36,6 @@ func (s *Service) Routes(api *gin.RouterGroup, origin string) {
 	group.POST("/reset-password", h.resetPassword)
 	group.POST("/verify-email", h.verifyEmail)
 	group.POST("/resend-verification", h.resendVerification)
-	api.GET("/me", h.me)
-}
-
-func (h handler) checkOrigin(c *gin.Context) {
-	if c.GetHeader("Origin") != h.origin {
-		httpapi.Error(c, http.StatusForbidden, "ORIGIN_REJECTED", "Origin tidak diizinkan.", nil)
-	}
 }
 
 // Separate minute windows and cap the number of peers tracked per process.
@@ -164,18 +152,24 @@ func (h handler) logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h handler) me(c *gin.Context) {
-	access, err := c.Cookie(accessCookie)
-	if err != nil {
-		sendError(c, errSession)
-		return
+func (s *Service) WithAccount(next func(*gin.Context, Account)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s == nil {
+			httpapi.Error(c, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "Layanan akun belum tersedia.", nil)
+			return
+		}
+		access, err := c.Cookie(accessCookie)
+		if err != nil {
+			sendError(c, errSession)
+			return
+		}
+		account, err := s.account(c.Request.Context(), access)
+		if err != nil {
+			sendError(c, err)
+			return
+		}
+		next(c, account)
 	}
-	account, err := h.service.account(c.Request.Context(), access)
-	if err != nil {
-		sendError(c, err)
-		return
-	}
-	httpapi.Success(c, http.StatusOK, account)
 }
 
 func (h handler) writeSession(c *gin.Context, result tokens) {
@@ -202,7 +196,7 @@ func sendError(c *gin.Context, err error) {
 	case errors.Is(err, errSession):
 		httpapi.Error(c, http.StatusUnauthorized, "INVALID_SESSION", "Kredensial atau sesi tidak valid.", nil)
 	default:
-		slog.Error("auth request failed", "request_id", c.Writer.Header().Get("X-Request-ID"), "error", err)
+		httpapi.LogInternalError(c, "auth request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Terjadi kesalahan. Coba lagi nanti.", nil)
 	}
 }
