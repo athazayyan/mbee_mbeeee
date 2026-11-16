@@ -1,6 +1,6 @@
 # TenantKu Backend
 
-Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan saat ini mencakup akun dan sesi, health check, serta kontrak OpenAPI yang dapat dibuka melalui Scalar.
+Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan saat ini mencakup akun, profil usaha dan organisasi, draft acara, aturan harga, pembacaan booking, serta kontrak OpenAPI yang dapat dibuka melalui Scalar.
 
 ## Prasyarat
 
@@ -48,12 +48,22 @@ Backend TenantKu menyediakan API HTTP dengan Go, Gin, dan PostgreSQL. Layanan sa
 
    `make migrate` dan `go run .` membaca `.env` dari root repo. Variabel yang sudah ada di environment memiliki prioritas. Jalankan kembali `make migrate` setelah mengambil migration baru. Runner melewati versi yang sudah tercatat dan mengenali database yang sudah menjalankan migration akun awal.
 
+## Worker kedaluwarsa booking
+
+Setelah migration diterapkan, jalankan worker di terminal lain dari root repo.
+
+```bash
+go run . worker
+```
+
+Worker membaca `DATABASE_URL` dan memeriksa hold yang jatuh tempo setiap 5 detik. Untuk satu siklus pemrosesan, gunakan `go run . worker --once`. Pada deployment, jalankan `./tenantku worker` sebagai proses terpisah dari API. Log JSON worker memuat `job_id` saat booking dilepas atau terjadi kegagalan.
+
 ## Verifikasi lokal
 
 | Endpoint | Hasil yang diharapkan |
 | --- | --- |
 | [GET /healthz](http://127.0.0.1:8080/healthz) | HTTP 200 dengan `{"status":"ok"}` |
-| [GET /readyz](http://127.0.0.1:8080/readyz) | HTTP 200 dengan `{"status":"ready"}` jika PostgreSQL dan tabel auth siap |
+| [GET /readyz](http://127.0.0.1:8080/readyz) | HTTP 200 dengan `{"status":"ready"}` jika PostgreSQL dan tabel aplikasi siap |
 | [GET /api-reference](http://127.0.0.1:8080/api-reference) | Scalar saat `API_DOCS_ENABLED=true` |
 | [GET /api/openapi.yaml](http://127.0.0.1:8080/api/openapi.yaml) | Dokumen OpenAPI saat `API_DOCS_ENABLED=true` |
 
@@ -67,7 +77,7 @@ Jika startup menampilkan `auth migration has not been applied`, periksa bahwa mi
 make check
 ```
 
-Perintah ini memeriksa format, menjalankan `go vet`, tes, dan build. Untuk tes integrasi sesi, siapkan database uji terpisah, isi `TENANTKU_TEST_DATABASE_URL`, dan terapkan migration sekali pada database uji sebelum menjalankan check.
+Perintah ini memeriksa format, menjalankan `go vet`, tes, dan build. Untuk tes integrasi sesi dan booking, siapkan database uji terpisah, isi `TENANTKU_TEST_DATABASE_URL`, dan terapkan migration sekali pada database uji sebelum menjalankan check. Tes booking membuat schema sementara di database uji.
 
 ```bash
 export TENANTKU_TEST_DATABASE_URL='postgres://user:password@localhost:5432/tenantku_test?sslmode=disable'
