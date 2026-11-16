@@ -62,16 +62,16 @@ func run(ctx context.Context) error {
 	var maxActiveHolds int
 	if raw := os.Getenv("BOOKING_MAX_ACTIVE_HOLDS"); raw != "" {
 		limit, err := strconv.Atoi(raw)
-		if err != nil || limit <= 0 {
-			return errors.New("BOOKING_MAX_ACTIVE_HOLDS must be a positive integer or empty")
+		if err != nil || limit != 1 {
+			return errors.New("BOOKING_MAX_ACTIVE_HOLDS must be 1 or empty")
 		}
 		maxActiveHolds = limit
 	}
-	holdDuration := 15 * time.Minute
+	holdDuration := 30 * time.Minute
 	if raw := os.Getenv("BOOKING_HOLD_DURATION"); raw != "" {
 		duration, err := time.ParseDuration(raw)
 		if err != nil || duration < time.Second {
-			return errors.New("BOOKING_HOLD_DURATION must be a duration of at least 1s, for example 15m")
+			return errors.New("BOOKING_HOLD_DURATION must be a duration of at least 1s, for example 30m")
 		}
 		holdDuration = duration
 	}

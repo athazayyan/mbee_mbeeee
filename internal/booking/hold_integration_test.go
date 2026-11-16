@@ -20,6 +20,7 @@ const (
 	testStandOne   = "00000000-0000-4000-8000-000000000001"
 	testStandTwo   = "00000000-0000-4000-8000-000000000002"
 	testStandThree = "00000000-0000-4000-8000-000000000003"
+	testOtherStand = "00000000-0000-4000-8000-000000000004"
 )
 
 type testOffers struct {
@@ -27,7 +28,8 @@ type testOffers struct {
 }
 
 func (o testOffers) ResolveOffer(_ context.Context, _ pgx.Tx, input OfferRequest) (Offer, error) {
-	if input.StandID != testStandOne && input.StandID != testStandTwo && input.StandID != testStandThree {
+	if input.StandID != testStandOne && input.StandID != testStandTwo &&
+		input.StandID != testStandThree && input.StandID != testOtherStand {
 		return Offer{}, ErrNotBookable
 	}
 	return o.offer, nil
@@ -63,7 +65,7 @@ func TestHoldTransactions(t *testing.T) {
 		PolicyVersion: "test-policy",
 		RefundPolicy:  json.RawMessage(`{"test": true}`),
 	}}
-	settings := HoldSettings{Lifetime: 15 * time.Minute, MaxActive: 1}
+	settings := HoldSettings{Lifetime: 30 * time.Minute, MaxActive: 1}
 	type request struct {
 		actor, business, stand, key string
 	}
@@ -154,6 +156,34 @@ func TestHoldTransactions(t *testing.T) {
 	a.stand, a.key = testStandTwo, "quota-first"
 	b.stand, b.key = testStandThree, "quota-second"
 	assertOne(raceClaims(a, b, limited), ErrQuotaFull)
+
+	third, thirdBusiness := createTestBusiness(t, ctx, s, category, "three@example.com")
+	a = request{third, thirdBusiness, testStandOne, "same-account-first"}
+	b = request{third, thirdBusiness, testStandTwo, "same-account-second"}
+	if _, err := s.DB.Exec(ctx, `UPDATE bookings SET expires_at = clock_timestamp()
+		WHERE event_id = $1 AND status = 'held'`, event); err != nil {
+		t.Fatal(err)
+	}
+	assertOne(raceClaims(a, b, offers), ErrHoldLimit)
+
+	otherEvent := insertID(t, ctx, s, `INSERT INTO events
+		(organization_id, created_by, name, slug, status, starts_at, ends_at, timezone, city, address, terms)
+		SELECT organization_id, created_by, 'Other event', 'other-event',
+			status, starts_at, ends_at, timezone, city, address, terms
+		FROM events WHERE id = $1 RETURNING id`, event)
+	otherSlot := insertID(t, ctx, s, `INSERT INTO event_slots (event_id, code, starts_at, ends_at)
+		SELECT id, 'whole-event', starts_at, ends_at FROM events WHERE id = $1 RETURNING id`, otherEvent)
+	execBookingSQL(t, ctx, s, `INSERT INTO event_layouts (event_id, revision, width, height, cell_meters, updated_by)
+		VALUES ($1, 1, 10, 10, 1, $2)`, otherEvent, first)
+	execBookingSQL(t, ctx, s, `INSERT INTO stands (id, event_id, code, x, y, width, height)
+		VALUES ($1, $2, 'B1', 1, 1, 1, 1)`, testOtherStand, otherEvent)
+	execBookingSQL(t, ctx, s, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
+		VALUES ($1, 1, $2, '{"default_base_price":30000}', now())`, otherEvent, first)
+	other := HoldInput{BusinessID: thirdBusiness, EventID: otherEvent, StandID: testOtherStand,
+		EventSlotID: otherSlot, AcceptedPolicyVersion: "test-policy"}
+	if _, err := s.CreateHold(ctx, third, "different-event", other, settings, offers); err != nil {
+		t.Fatalf("active hold in another event blocked new hold: %v", err)
+	}
 }
 
 func createTestStands(t *testing.T, ctx context.Context, s Store, event, organizer string) {
