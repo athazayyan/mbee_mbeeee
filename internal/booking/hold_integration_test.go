@@ -232,6 +232,11 @@ func migratedBookingStore(t *testing.T, ctx context.Context) Store {
 		if !strings.HasSuffix(migration.Name(), ".up.sql") {
 			continue
 		}
+		// Event cancellation uses a privileged function fixed to the deployment's
+		// public schema. These hold tests only migrate a disposable schema.
+		if migration.Name() == "00013_cancel_unpaid_event_bookings.up.sql" {
+			continue
+		}
 		sql, err := os.ReadFile(filepath.Join(directory, migration.Name()))
 		if err != nil {
 			t.Fatal(err)
