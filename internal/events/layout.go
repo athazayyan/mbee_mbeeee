@@ -319,22 +319,22 @@ func checkCategories(ctx context.Context, tx pgx.Tx, stands []layoutStand) error
 	return nil
 }
 
-// protectReservedStands refuses to remove, move, or resize a stand with an active hold, offer, or reservation.
+// protectReservedStands preserves the identity, block, and position of allocated stands.
 func protectReservedStands(ctx context.Context, tx pgx.Tx, eventID string, stands []layoutStand) error {
-	rows, err := tx.Query(ctx, `SELECT s.id::text, s.code, s.x, s.y, s.width, s.height, s.rotation FROM stands s
+	rows, err := tx.Query(ctx, `SELECT s.id::text, s.code, COALESCE(s.block_id::text, ''), s.x, s.y, s.width, s.height, s.rotation FROM stands s
 		WHERE s.event_id = $1 AND s.removed_at IS NULL AND EXISTS (SELECT 1 FROM allocations a
 		WHERE a.event_id = s.event_id AND a.stand_id = s.id AND a.status IN ('hold', 'offer', 'reserved'))`, eventID)
 	if err != nil {
 		return err
 	}
 	type reserved struct {
-		id, code string
-		rect     layoutRect
-		rotation int
+		id, code, blockID string
+		rect              layoutRect
+		rotation          int
 	}
 	locked, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (reserved, error) {
 		var value reserved
-		err := row.Scan(&value.id, &value.code, &value.rect.X, &value.rect.Y, &value.rect.Width, &value.rect.Height, &value.rotation)
+		err := row.Scan(&value.id, &value.code, &value.blockID, &value.rect.X, &value.rect.Y, &value.rect.Width, &value.rect.Height, &value.rotation)
 		return value, err
 	})
 	if err != nil {
@@ -346,7 +346,8 @@ func protectReservedStands(ctx context.Context, tx pgx.Tx, eventID string, stand
 	}
 	for _, stand := range locked {
 		updated, kept := next[stand.id]
-		if !kept || updated.layoutRect != stand.rect || updated.Rotation != stand.rotation || !updated.Active {
+		if !kept || updated.Code != stand.code || existing(updated.BlockID, "") != stand.blockID ||
+			updated.layoutRect != stand.rect || updated.Rotation != stand.rotation || !updated.Active {
 			return reservedStandError{code: stand.code}
 		}
 	}
