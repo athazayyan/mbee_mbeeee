@@ -80,6 +80,20 @@ GRANT INSERT (event_id, revision, requested_by, reason, snapshot_before, snapsho
 GRANT INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
+-- Denah (E05): revisi penuh menulis ulang blok dan area, sedangkan stand hanya ditandai removed_at.
+GRANT SELECT ON public.event_layouts, public.layout_blocks, public.layout_areas, public.stands,
+    public.event_layout_revisions TO :"api_role";
+-- Status alokasi dipakai untuk melindungi stand terpesan dan menghitung status stand di denah publik.
+GRANT SELECT (event_id, status) ON public.allocations TO :"api_role";
+GRANT INSERT (event_id, revision, width, height, cell_meters, updated_by),
+    UPDATE (revision, width, height, cell_meters, updated_by, updated_at) ON public.event_layouts TO :"api_role";
+GRANT INSERT (id, event_id, label, x, y, width, height), UPDATE (label, x, y, width, height), DELETE
+    ON public.layout_blocks TO :"api_role";
+GRANT INSERT (event_id, kind, x, y, width, height), DELETE ON public.layout_areas TO :"api_role";
+GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active),
+    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
+    ON public.stands TO :"api_role";
+GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
