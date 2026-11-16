@@ -30,6 +30,7 @@ func (fieldErrors) Error() string { return "product validation failed" }
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/businesses/:id/products", sessions.WithAccount(s.listProducts))
 	api.GET("/businesses/:id/sales", sessions.WithAccount(s.listSalesHandler))
+	api.GET("/businesses/:id/expenses", sessions.WithAccount(s.getExpenses))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
@@ -39,6 +40,8 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	mutations.POST("/products/:id/stock-movements", sessions.WithAccount(s.moveStock))
 	mutations.POST("/businesses/:id/pos-sessions", sessions.WithAccount(s.openPosSession))
 	mutations.POST("/sync/sales", sessions.WithAccount(s.syncSales))
+	mutations.POST("/sales/:id/adjustments", sessions.WithAccount(s.createAdjustment))
+	mutations.POST("/businesses/:id/expenses", sessions.WithAccount(s.postExpense))
 }
 
 func validRupiah(value *int64) bool { return value == nil || (*value >= 0 && *value <= maxRupiah) }
@@ -256,6 +259,12 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.", fields)
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Data atau usaha tidak ditemukan.", nil)
+	case errors.Is(err, errIdempotencyMismatch):
+		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Gunakan key baru untuk permintaan yang berbeda.", nil)
+	case errors.Is(err, errSaleVoided):
+		httpapi.Error(c, http.StatusConflict, "SALE_ALREADY_VOIDED", "Transaksi ini sudah di-void.", nil)
+	case errors.Is(err, errNothingToAdjust):
+		httpapi.Error(c, http.StatusConflict, "NOTHING_TO_ADJUST", "Semua barang pada transaksi ini sudah dikembalikan.", nil)
 	case errors.Is(err, errStockOverflow):
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.",
 			map[string]string{"delta": "Stok produk harus tetap di antara -1.000.000 dan 1.000.000."})
