@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -15,10 +18,43 @@ import (
 )
 
 const (
-	expiryBatchSize = 100
-	expiryInterval  = 5 * time.Second
-	expiryTimeout   = 15 * time.Second
+	expiryBatchSize   = 100
+	expiryInterval    = 5 * time.Second
+	expiryTimeout     = 15 * time.Second
+	expiryReadyWindow = 2*expiryInterval + expiryTimeout
 )
+
+type expiryReadiness struct {
+	lastSuccess atomic.Pointer[time.Time]
+}
+
+func (r *expiryReadiness) record(err error, now time.Time) {
+	if err != nil {
+		r.lastSuccess.Store(nil)
+		return
+	}
+	r.lastSuccess.Store(&now)
+}
+
+func (r *expiryReadiness) ready(now time.Time) bool {
+	last := r.lastSuccess.Load()
+	return last != nil && now.Sub(*last) < expiryReadyWindow
+}
+
+func (r *expiryReadiness) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		if !r.ready(time.Now()) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"unavailable"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	})
+	return mux
+}
 
 func runWorker(ctx context.Context, args []string) error {
 	once := len(args) == 1 && args[0] == "--once"
@@ -44,6 +80,22 @@ func runWorker(ctx context.Context, args []string) error {
 		return fmt.Errorf("worker readiness check failed (%s); verify the database connection and run migrations", expiryErrorCode(err))
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "booking_expiry")
+	var readiness expiryReadiness
+	var listenerErrors <-chan error
+	if address := os.Getenv("WORKER_HEALTH_ADDR"); !once && address != "" {
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			return fmt.Errorf("worker readiness listener: %w", err)
+		}
+		server := &http.Server{
+			Handler: readiness.handler(), ReadHeaderTimeout: 2 * time.Second,
+			ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second, IdleTimeout: 15 * time.Second,
+		}
+		defer server.Close()
+		failure := make(chan error, 1)
+		listenerErrors = failure
+		go func() { failure <- server.Serve(listener) }()
+	}
 	logger.Info("worker started", "interval", expiryInterval.String(), "once", once)
 	if once {
 		return expireBatch(ctx, store, logger)
@@ -56,9 +108,14 @@ func runWorker(ctx context.Context, args []string) error {
 		case <-ctx.Done():
 			logger.Info("worker stopped")
 			return nil
+		case err := <-listenerErrors:
+			return fmt.Errorf("worker readiness server: %w", err)
 		case <-timer.C:
 			// A failure is logged with its job ID and retried on the next cycle.
-			_ = expireBatch(ctx, store, logger)
+			err := expireBatch(ctx, store, logger)
+			if ctx.Err() == nil {
+				readiness.record(err, time.Now())
+			}
 			timer.Reset(expiryInterval)
 		}
 	}

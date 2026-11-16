@@ -58,6 +58,8 @@ go run . worker
 
 Worker membaca `DATABASE_URL` dan memeriksa hold yang jatuh tempo setiap 5 detik. Untuk satu siklus pemrosesan, gunakan `go run . worker --once`. Pada deployment, jalankan `./tenantku worker` sebagai proses terpisah dari API. Log JSON worker memuat `job_id` saat booking dilepas atau terjadi kegagalan.
 
+Untuk memantau proses kontinu, set `WORKER_HEALTH_ADDR=127.0.0.1:8081` atau alamat internal yang dapat dijangkau pemantau. Worker menjawab `GET /readyz` dengan 200 setelah satu siklus expiry berhasil, termasuk saat antrean kosong. Jawaban menjadi 503 jika siklus terakhir gagal atau 25 detik berlalu sejak keberhasilan terakhir. `worker --once` memakai kode keluar proses sebagai hasil.
+
 ## Hak akses PostgreSQL saat deployment
 
 Siapkan tiga akun di setiap database TenantKu. Akun migration memiliki database dan tabel. Akun API dan akun worker adalah akun login khusus layanan dengan hak akses dari `deploy/postgres/runtime.sql`. Simpan kredensial tiap akun di konfigurasi secret environment masing-masing.
