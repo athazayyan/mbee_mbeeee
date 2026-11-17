@@ -33,7 +33,7 @@ func (err reservedStandError) Error() string {
 }
 
 var areaKinds = map[string]string{
-	"walkway": "lorong", "entrance": "pintu masuk", "stage": "panggung", "restricted": "area terlarang",
+	"walkway": "lorong", "entrance": "pintu masuk", "exit": "pintu keluar", "stage": "panggung", "restricted": "area terlarang",
 }
 
 type layoutRect struct {
@@ -62,7 +62,15 @@ type layoutStand struct {
 	CategoryIDs []string `json:"category_ids"`
 	Facilities  []string `json:"facilities"`
 	Active      bool     `json:"active"`
+	// Type menentukan ilustrasi stand di editor dan peta tenant; kosong berarti stand umum.
+	Type *string `json:"stand_type,omitempty"`
 	layoutRect
+}
+
+// standTypes adalah jenis stand yang punya ilustrasi; sama dengan CHECK di tabel stands.
+var standTypes = map[string]bool{
+	"makanan_berat": true, "minuman": true, "dessert": true, "fresh_product": true, "pakaian": true,
+	"aksesoris": true, "beauty": true, "photobooth": true, "lainnya": true,
 }
 
 // span is the footprint on the grid after rotation, matching the frontend editor.
@@ -203,6 +211,12 @@ func (input *layoutInput) validate() fieldErrors {
 			if !httpapi.ValidID(category) {
 				fields["stands"] = fmt.Sprintf("Kategori %s tidak valid.", name)
 			}
+		}
+		if stand.Type != nil && *stand.Type == "" {
+			stand.Type = nil
+		}
+		if stand.Type != nil && !standTypes[*stand.Type] {
+			fields["stands"] = fmt.Sprintf("Jenis stand %s tidak dikenal.", name)
 		}
 		if stand.Facilities == nil {
 			stand.Facilities = []string{}
@@ -417,13 +431,14 @@ func replaceLayoutItems(ctx context.Context, tx pgx.Tx, eventID string, input la
 	}
 	for _, stand := range input.Stands {
 		tag, err := tx.Exec(ctx, `INSERT INTO stands (id, event_id, block_id, code, x, y, width, height, rotation,
-			category_ids, facilities, active) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[]::uuid[], $11, $12)
+			category_ids, facilities, active, stand_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text[]::uuid[], $11, $12, $13)
 			ON CONFLICT (id) DO UPDATE SET block_id = EXCLUDED.block_id, code = EXCLUDED.code, x = EXCLUDED.x,
 			y = EXCLUDED.y, width = EXCLUDED.width, height = EXCLUDED.height, rotation = EXCLUDED.rotation,
 			category_ids = EXCLUDED.category_ids, facilities = EXCLUDED.facilities, active = EXCLUDED.active,
+			stand_type = EXCLUDED.stand_type,
 			removed_at = NULL WHERE stands.event_id = EXCLUDED.event_id`,
 			stand.ID, eventID, stand.BlockID, stand.Code, stand.X, stand.Y, stand.Width, stand.Height, stand.Rotation,
-			stand.CategoryIDs, stand.Facilities, stand.Active)
+			stand.CategoryIDs, stand.Facilities, stand.Active, stand.Type)
 		if err != nil {
 			return err
 		}
@@ -469,14 +484,14 @@ func loadLayout(ctx context.Context, tx pgx.Tx, eventID string) (layoutRevision,
 		return layoutRevision{}, err
 	}
 	rows, err = tx.Query(ctx, `SELECT id::text, block_id::text, code, x, y, width, height, rotation,
-		category_ids::text[], facilities, active FROM stands WHERE event_id = $1 AND removed_at IS NULL ORDER BY code, id`, eventID)
+		category_ids::text[], facilities, active, stand_type FROM stands WHERE event_id = $1 AND removed_at IS NULL ORDER BY code, id`, eventID)
 	if err != nil {
 		return layoutRevision{}, err
 	}
 	result.Stands, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (layoutStand, error) {
 		var value layoutStand
 		err := row.Scan(&value.ID, &value.BlockID, &value.Code, &value.X, &value.Y, &value.Width, &value.Height,
-			&value.Rotation, &value.CategoryIDs, &value.Facilities, &value.Active)
+			&value.Rotation, &value.CategoryIDs, &value.Facilities, &value.Active, &value.Type)
 		return value, err
 	})
 	if err != nil {
