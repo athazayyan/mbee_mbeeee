@@ -1347,7 +1347,8 @@ paths:
       description: Pemilik organisasi acara. Menyimpan denah sebagai revisi baru setelah memvalidasi batas grid,
         tumpang tindih, kode unik, dan kategori. Stand dengan hold, offer, atau reservasi aktif tidak boleh dihapus,
         dipindah, diubah ukuran, kode, atau bloknya, maupun dinonaktifkan (STAND_HAS_BOOKING). Acara selesai atau dibatalkan ditolak
-        (EVENT_CLOSED). Harga stand diatur lewat PUT /events/{id}/pricing.
+        (EVENT_CLOSED). Saat EVENT_PLAN_REQUIRED aktif, paket harus aktif dan jumlah stand aktif harus sesuai kapasitas.
+        Pelanggaran paket mengembalikan kesalahan pada field plan. Harga stand diatur lewat PUT /events/{id}/pricing.
       x-implementation-status: implemented
       security:
       - AccessCookie: []

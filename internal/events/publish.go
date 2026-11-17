@@ -212,23 +212,36 @@ func (s Store) withPlan(ctx context.Context, tx pgx.Tx, eventID string, err erro
 	if fields == nil {
 		fields = make(fieldErrors)
 	}
-	var active bool
-	var capacity *int
 	var stands int
-	if qerr := tx.QueryRow(ctx, `SELECT true, p.capacity_stands, (SELECT count(*) FROM stands s
-			WHERE s.event_id = $1 AND s.removed_at IS NULL AND s.active)
-		FROM event_plan_purchases p WHERE p.event_id = $1 AND p.status = 'active'`, eventID).Scan(&active, &capacity, &stands); qerr != nil &&
-		!errors.Is(qerr, pgx.ErrNoRows) {
-		return qerr
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM stands
+		WHERE event_id = $1 AND removed_at IS NULL AND active`, eventID).Scan(&stands); err != nil {
+		return err
 	}
-	switch {
-	case !active:
-		fields["plan"] = "Aktifkan paket acara sebelum terbit."
-	case capacity != nil && stands > *capacity:
-		fields["plan"] = fmt.Sprintf("Paket mendukung maksimal %d stand aktif, denah memiliki %d.", *capacity, stands)
+	issue, err := planIssue(ctx, tx, eventID, stands)
+	if err != nil {
+		return err
+	}
+	if issue != "" {
+		fields["plan"] = issue
 	}
 	if len(fields) > 0 {
 		return fields
 	}
 	return nil
+}
+
+func planIssue(ctx context.Context, tx pgx.Tx, eventID string, stands int) (string, error) {
+	var capacity *int
+	err := tx.QueryRow(ctx, `SELECT capacity_stands FROM event_plan_purchases
+		WHERE event_id = $1 AND status = 'active'`, eventID).Scan(&capacity)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "Aktifkan paket acara untuk melanjutkan.", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if capacity != nil && stands > *capacity {
+		return fmt.Sprintf("Paket mendukung maksimal %d stand aktif, denah memiliki %d.", *capacity, stands), nil
+	}
+	return "", nil
 }

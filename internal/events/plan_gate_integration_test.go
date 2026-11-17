@@ -82,6 +82,7 @@ func TestPublishRequiresActivePlan(t *testing.T) {
 	}
 	must(&user, `INSERT INTO users (email, password_hash) VALUES ('o@example.com', 'x') RETURNING id`)
 	must(&org, `INSERT INTO organizations (owner_id, name) VALUES ($1, 'Org') RETURNING id`, user)
+	exec(`INSERT INTO memberships (user_id, organization_id, role) VALUES ($1, $2, 'owner')`, user, org)
 	must(&event, `INSERT INTO events (organization_id, created_by, name, slug, starts_at, ends_at, timezone, city, address, terms)
 		VALUES ($1, $2, 'E', 'e', now(), now() + interval '2 days', 'Asia/Jakarta', 'Banda Aceh', 'St', 'T') RETURNING id`, org, user)
 	exec(`INSERT INTO event_layouts (event_id, revision, width, height, cell_meters, updated_by) VALUES ($1, 1, 10, 10, 1, $2)`, event, user)
@@ -117,6 +118,18 @@ func TestPublishRequiresActivePlan(t *testing.T) {
 	if err := check(Store{RequirePlan: true}, nil); err == nil {
 		t.Fatal("pending purchase must not satisfy the gate")
 	}
+	store := Store{DB: pool, RequirePlan: true}
+	layout, err := store.organizerLayout(ctx, user, org, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	save := func() error {
+		_, err := store.saveLayout(ctx, user, event, layoutETag(layout.Revision), layout.layoutInput)
+		return err
+	}
+	if err := save(); !errors.As(err, &fields) || fields["plan"] == "" {
+		t.Fatalf("pending plan must block layout changes: %v", err)
+	}
 	// Active plan with enough capacity passes; too little capacity does not.
 	exec(`UPDATE event_plan_purchases SET status = 'active', activated_at = now(), capacity_stands = 2 WHERE event_id = $1`, event)
 	if err := check(Store{RequirePlan: true}, nil); err != nil {
@@ -125,5 +138,12 @@ func TestPublishRequiresActivePlan(t *testing.T) {
 	exec(`UPDATE event_plan_purchases SET capacity_stands = 1 WHERE event_id = $1`, event)
 	if err := check(Store{RequirePlan: true}, nil); !errors.As(err, &fields) || !strings.Contains(fields["plan"], "maksimal 1 stand") {
 		t.Fatalf("capacity exceeded: %v", err)
+	}
+	if err := save(); !errors.As(err, &fields) || !strings.Contains(fields["plan"], "maksimal 1 stand") {
+		t.Fatalf("capacity must block layout changes: %v", err)
+	}
+	layout.Stands[1].Active = false
+	if err := save(); err != nil {
+		t.Fatalf("layout within active plan capacity: %v", err)
 	}
 }
