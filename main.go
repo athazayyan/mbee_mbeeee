@@ -29,6 +29,7 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/messaging"
 	"kitakarsa.com/tenantku/backend/internal/notify"
 	"kitakarsa.com/tenantku/backend/internal/reports"
+	"kitakarsa.com/tenantku/backend/internal/reviews"
 )
 
 func main() {
@@ -133,6 +134,7 @@ func run(ctx context.Context) error {
 		reportStore := reports.Store{DB: pool}
 		notifications := notify.Store{DB: pool}
 		chats := messaging.Store{DB: pool}
+		reviewStore := reviews.Store{DB: pool}
 		payments := payment.Store{DB: pool}
 		if key := os.Getenv("MIDTRANS_SERVER_KEY"); key != "" {
 			if os.Getenv("MIDTRANS_ENV") != "sandbox" {
@@ -165,6 +167,9 @@ func run(ctx context.Context) error {
 			}
 			if err := chats.Ready(probe); err != nil {
 				return fmt.Errorf("messaging schema unavailable; run make migrate: %w", err)
+			}
+			if err := reviewStore.Ready(probe); err != nil {
+				return fmt.Errorf("review schema unavailable; run make migrate: %w", err)
 			}
 			if maxActiveHolds > 0 {
 				if _, err := pool.Exec(probe, "SELECT version FROM hold_policy_versions LIMIT 0"); err != nil {
@@ -205,6 +210,7 @@ func run(ctx context.Context) error {
 		reportStore.Routes(api, service, origin)
 		notifications.Routes(api, service, origin)
 		chats.Routes(api, service, origin)
+		reviewStore.Routes(api, service, origin)
 		if maxActiveHolds > 0 {
 			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
 			settings := booking.HoldSettings{Lifetime: holdDuration, MaxActive: maxActiveHolds}
@@ -248,6 +254,7 @@ func run(ctx context.Context) error {
 		reports.Store{}.Routes(api, nil, "")
 		notify.Store{}.Routes(api, nil, "")
 		messaging.Store{}.Routes(api, nil, "")
+		reviews.Store{}.Routes(api, nil, "")
 		payment.Store{}.Routes(api, nil, "")
 	}
 	if !holdEnabled {

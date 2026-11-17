@@ -4412,12 +4412,47 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/reviews:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: getBookingReviews
+      summary: Baca ulasan booking
+      description: Peserta booking (anggota usaha atau organisasi pemilik acara). Memberi kelayakan, ulasan milik pihak pemanggil, dan ulasan pihak lain yang tayang.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/BookingReviews'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
     post:
       tags: ['Pesan, ulasan, dan notifikasi']
       operationId: createReview
-      summary: '[Rencana] Beri ulasan booking'
-      description: Hanya pihak booking yang memenuhi syarat. Satu ulasan per pihak.
-      x-implementation-status: planned
+      summary: Beri ulasan booking
+      description: Hanya booking confirmed yang acaranya sudah berakhir (atau berstatus completed) dan tidak dibatalkan. Satu ulasan per pihak per booking; ulasan kedua memberi 409 REVIEW_EXISTS, booking belum layak memberi 409 REVIEW_NOT_ELIGIBLE.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4440,6 +4475,189 @@ paths:
                 required: [data, meta]
                 properties:
                   data: {$ref: '#/components/schemas/ResourceStatus'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /reviews/{id}:
+    patch:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: updateReview
+      summary: Ubah ulasan
+      description: Anggota pihak penulis, paling lama 30 hari setelah ulasan dibuat dan selama belum disembunyikan. Versi lama disimpan sebagai riwayat edit.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Review'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /organizations/{id}/reviews:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listOrganizerReviews
+      summary: Ulasan publik penyelenggara
+      description: Ulasan tenant yang tayang untuk penyelenggara, berisi jumlah, rata-rata, dan 20 ulasan terbaru. Tanpa data akun penulis.
+      x-implementation-status: implemented
+      security: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/OrganizerReviews'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/reviews:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listAdminReviews
+      summary: Daftar ulasan untuk moderasi
+      description: Admin platform. 100 ulasan terbaru per status.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [published, hidden], default: published}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminReview'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/reviews/{id}/moderation:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: moderateReview
+      summary: Sembunyikan atau pulihkan ulasan
+      description: Admin platform. Alasan wajib dan tercatat di audit admin.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewModeration'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminReview'}
                   meta: {$ref: '#/components/schemas/EmptyMeta'}
         '401':
           description: Sesi pengguna atau tanda tangan provider tidak valid
@@ -6429,6 +6647,79 @@ components:
       properties:
         client_message_id: {type: string, format: uuid}
         text: {type: string, minLength: 1, maxLength: 4000}
+    Review:
+      type: object
+      required: [id, booking_id, author_side, author_name, event_name, rating, status, created_at, updated_at, edited]
+      properties:
+        id: {type: string, format: uuid}
+        booking_id: {type: string, format: uuid}
+        author_side: {type: string, enum: [business, organization]}
+        author_name: {type: string}
+        event_name: {type: string}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string, maxLength: 2000}
+        status: {type: string, enum: [published, hidden]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        edited: {type: boolean}
+        editable_until: {type: string, format: date-time, description: Hanya untuk ulasan milik pihak pemanggil.}
+    BookingReviews:
+      type: object
+      required: [side, eligible]
+      properties:
+        side: {type: string, enum: [business, organization]}
+        eligible: {type: boolean}
+        reason: {type: string, enum: [event_cancelled, booking_not_confirmed, event_not_finished]}
+        mine: {$ref: '#/components/schemas/Review'}
+        counterpart: {$ref: '#/components/schemas/Review'}
+    OrganizerReviews:
+      type: object
+      required: [organization_id, organization_name, count, reviews]
+      properties:
+        organization_id: {type: string, format: uuid}
+        organization_name: {type: string}
+        count: {type: integer, minimum: 0}
+        average: {type: number, minimum: 1, maximum: 5}
+        reviews:
+          type: array
+          items:
+            type: object
+            required: [id, rating, business_name, event_name, created_at, edited]
+            properties:
+              id: {type: string, format: uuid}
+              rating: {type: integer, minimum: 1, maximum: 5}
+              comment: {type: string}
+              business_name: {type: string}
+              event_name: {type: string}
+              created_at: {type: string, format: date-time}
+              edited: {type: boolean}
+    AdminReview:
+      type: object
+      required: [id, booking_id, author_side, author_name, event_name, rating, status, created_at, updated_at, edited,
+        author_email, business_name, organization_name, revisions]
+      properties:
+        id: {type: string, format: uuid}
+        booking_id: {type: string, format: uuid}
+        author_side: {type: string, enum: [business, organization]}
+        author_name: {type: string}
+        event_name: {type: string}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        comment: {type: string, maxLength: 2000}
+        status: {type: string, enum: [published, hidden]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        edited: {type: boolean}
+        editable_until: {type: string, format: date-time, description: Hanya untuk ulasan milik pihak pemanggil.}
+        author_email: {type: string}
+        business_name: {type: string}
+        organization_name: {type: string}
+        revisions: {type: integer, minimum: 0}
+    ReviewModeration:
+      type: object
+      required: [action, reason]
+      properties:
+        action: {type: string, enum: [hide, restore]}
+        reason: {type: string, minLength: 1, maxLength: 500}
     ReviewInput:
       type: object
       required: [rating]
