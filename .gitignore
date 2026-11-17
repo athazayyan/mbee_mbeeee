@@ -4,5 +4,7 @@
 
 /backend
 /bin/
+# File unggahan lokal (UPLOAD_DIR bawaan).
+/data/
 *.test
 *.out

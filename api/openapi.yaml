@@ -3088,8 +3088,8 @@ paths:
       operationId: createProduct
       summary: Tambah produk
       description: Hanya pemilik usaha. initial_stock lebih dari 0 dicatat sebagai mutasi stok 'initial'. SKU unik
-        per usaha tanpa membedakan huruf besar (409 SKU_IN_USE). Foto produk belum didukung; photo_upload_id
-        ditolak dengan 422.
+        per usaha tanpa membedakan huruf besar (409 SKU_IN_USE). photo_upload_id harus unggahan product_photo
+        berstatus ready milik usaha yang sama; selain itu 422.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -4281,6 +4281,34 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /reports/{id}/pdf:
+    get:
+      tags: [Rapor usaha]
+      operationId: downloadReportPdf
+      summary: Unduh rapor sebagai PDF
+      description: Pemilik usaha. PDF dibuat dari snapshot tersimpan sehingga isinya selalu sama, lengkap dengan sumber,
+        kelengkapan, label belum diverifikasi, dan kode verifikasi.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Berkas PDF
+          content:
+            application/pdf: {schema: {type: string, format: binary}}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /reports/{id}:
     get:
       tags: [Rapor usaha]
@@ -5335,9 +5363,12 @@ paths:
     post:
       tags: [Unggahan]
       operationId: presignUpload
-      summary: '[Rencana] Buat upload intent'
-      description: Scope, MIME, dan ukuran divalidasi server sebelum mengeluarkan URL bertenggat.
-      x-implementation-status: planned
+      summary: Buat upload intent
+      description: Foto produk hanya untuk pemilik usaha (owner_id = usaha); banner acara untuk anggota organisasi
+        (owner_id = organisasi). Hanya JPEG, PNG, atau WebP hingga 5 MB. URL berlaku 15 menit dan ditandatangani server;
+        unggah isi file dengan PUT ke URL itu lalu panggil /uploads/complete. Paling banyak 20 unggahan pending per jam.
+        dispute_evidence belum tersedia (422).
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       requestBody:
@@ -5382,13 +5413,109 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /uploads/{id}/content:
+    put:
+      tags: [Unggahan]
+      operationId: putUploadContent
+      summary: Unggah isi file
+      description: Memakai URL dari /uploads/presign (expires dan signature), bukan cookie. Content-Type harus sama dengan
+        intent dan ukuran harus persis size_bytes. Boleh diulang sebelum /uploads/complete.
+      x-implementation-status: implemented
+      security: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: expires, in: query, required: true, schema: {type: string}}
+      - {name: signature, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          image/jpeg: {schema: {type: string, format: binary}}
+          image/png: {schema: {type: string, format: binary}}
+          image/webp: {schema: {type: string, format: binary}}
+      responses:
+        '204':
+          description: Isi file diterima
+        '403':
+          description: Tanda tangan URL tidak valid atau kedaluwarsa
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Intent tidak ditemukan, sudah selesai, atau kedaluwarsa
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413':
+          description: Ukuran file melebihi intent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Tipe atau ukuran file tidak sesuai intent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /uploads/{id}/file:
+    get:
+      tags: [Unggahan]
+      operationId: getUploadFile
+      summary: Baca file unggahan
+      description: Anggota usaha atau organisasi pemilik file. Hanya unggahan ready. Disajikan dengan nosniff dan CSP sandbox.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Isi file
+          content:
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/png: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /public/uploads/{id}:
+    get:
+      tags: [Unggahan]
+      operationId: getPublicUpload
+      summary: Baca banner acara
+      description: Hanya unggahan event_banner yang ready. Tujuan lain selalu 404.
+      x-implementation-status: implemented
+      security: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Isi file
+          content:
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/png: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /uploads/complete:
     post:
       tags: [Unggahan]
       operationId: completeUpload
-      summary: '[Rencana] Selesaikan unggahan'
-      description: Pemilik intent. Periksa objek asli, ukuran, tipe, dan status pemeriksaan konten.
-      x-implementation-status: planned
+      summary: Selesaikan unggahan
+      description: Pembuat intent. Server memeriksa ukuran, tanda tangan biner file, dan dimensi gambar (paling besar
+        8000 × 8000). File yang tidak lolos berstatus rejected dan dihapus. Belum ada isi file memberi 409 UPLOAD_EMPTY.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       requestBody:
@@ -6906,6 +7033,7 @@ components:
         price: {$ref: '#/components/schemas/Rupiah'}
         cost: {$ref: '#/components/schemas/Rupiah'}
         category_id: {type: string, format: uuid}
+        photo_upload_id: {type: string, format: uuid, description: 'Foto produk; baca lewat GET /uploads/{id}/file.'}
         stock:
           type: integer
           description: Boleh negatif bila penjualan kasir offline melebihi stok tercatat.
@@ -6920,7 +7048,7 @@ components:
         price: {$ref: '#/components/schemas/Rupiah'}
         cost: {$ref: '#/components/schemas/Rupiah'}
         category_id: {type: string, format: uuid}
-        photo_upload_id: {type: string, format: uuid, description: Belum didukung; selalu ditolak.}
+        photo_upload_id: {type: string, format: uuid, description: Unggahan product_photo berstatus ready milik usaha ini.}
         initial_stock: {type: integer, minimum: 0, maximum: 1000000}
     ProductUpdate:
       type: object
@@ -6935,6 +7063,7 @@ components:
           - {$ref: '#/components/schemas/Rupiah'}
           - {type: 'null'}
         category_id: {type: [string, 'null'], format: uuid}
+        photo_upload_id: {type: [string, 'null'], format: uuid, description: null menghapus foto produk.}
         archived: {type: boolean}
     StockMovementInput:
       type: object
@@ -7510,11 +7639,12 @@ components:
         read_at: {type: string, format: date-time}
     PresignInput:
       type: object
-      required: [purpose, content_type, size_bytes]
+      required: [purpose, content_type, size_bytes, owner_id]
       properties:
         purpose: {type: string, enum: [event_banner, product_photo, dispute_evidence]}
-        content_type: {type: string, minLength: 1}
-        size_bytes: {type: integer, minimum: 1}
+        content_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
+        size_bytes: {type: integer, minimum: 1, maximum: 5242880}
+        owner_id: {type: string, format: uuid, description: Usaha untuk product_photo, organisasi untuk event_banner.}
     UploadIntent:
       type: object
       required: [upload_id, url, method, headers, expires_at]
@@ -7534,7 +7664,8 @@ components:
       required: [upload_id, status]
       properties:
         upload_id: {type: string, format: uuid}
-        status: {type: string, enum: [pending_scan, ready, rejected]}
+        status: {type: string, enum: [ready, rejected]}
+        reason: {type: string, description: Alasan penolakan bila rejected.}
     AuditEvent:
       type: object
       required: [id, actor_id, actor_email, action, resource_type, reason, occurred_at, request_id]
