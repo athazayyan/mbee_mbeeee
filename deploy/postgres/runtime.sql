@@ -128,6 +128,15 @@ GRANT INSERT (business_id, id, label, registered_by),
 -- Notifikasi (E15): inbox hanya bisa dibaca dan ditandai dibaca; isinya ditulis worker.
 GRANT SELECT ON public.notifications TO :"api_role";
 GRANT UPDATE (read_at) ON public.notifications TO :"api_role";
+-- Chat (E15): pesan hanya ditambah; moderasi admin menyembunyikan dan menutup laporan.
+GRANT SELECT ON public.conversations, public.messages, public.conversation_reads, public.message_reports TO :"api_role";
+GRANT INSERT (event_id, business_id, organization_id, booking_id, created_by), UPDATE (last_message_at)
+    ON public.conversations TO :"api_role";
+GRANT INSERT (conversation_id, sender_id, sender_side, client_message_id, body), UPDATE (hidden_at, hidden_by)
+    ON public.messages TO :"api_role";
+GRANT INSERT (conversation_id, user_id, last_read_at), UPDATE (last_read_at) ON public.conversation_reads TO :"api_role";
+GRANT INSERT (message_id, reporter_id, reason, note), UPDATE (status, resolved_at, resolved_by)
+    ON public.message_reports TO :"api_role";
 -- Rapor usaha (E14): snapshot tidak pernah diubah; tautan berbagi hanya bisa dicabut dan dicatat dilihat.
 GRANT SELECT ON public.business_reports, public.report_shares TO :"api_role";
 GRANT INSERT (business_id, event_id, period_start, period_end, timezone, status, snapshot, verification_code,
