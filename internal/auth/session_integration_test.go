@@ -32,7 +32,7 @@ func TestRefreshReplayRevokesSession(t *testing.T) {
 	}
 	email := strings.ToLower(rand.Text()) + "@example.com"
 	const password = "session fixture password"
-	account, err := service.register(ctx, email, password)
+	account, err := service.register(ctx, email, password, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

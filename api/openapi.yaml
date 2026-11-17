@@ -13,8 +13,12 @@ paths:
     post:
       operationId: register
       summary: Create an account
+      description: Profil pendaftaran bersifat opsional. Tenant mengirim nama usaha dan kategori, penyelenggara mengirim nama penyelenggara dan nama acara pertama. Usaha atau organisasi dibuat bersama akun, tetapi akun tetap harus memverifikasi email sebelum bisa masuk.
       requestBody:
-        $ref: '#/components/requestBodies/Credentials'
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RegisterInput'}
       responses:
         '201':
           $ref: '#/components/responses/Account'
@@ -4365,6 +4369,25 @@ components:
           format: password
           minLength: 12
           description: Maximum 72 UTF-8 bytes.
+    SignupProfile:
+      type: object
+      additionalProperties: false
+      required: [role, phone]
+      properties:
+        role: {type: string, enum: [tenant, organizer]}
+        phone: {type: string, description: 'Nomor HP Indonesia, boleh diawali 08, 62, atau +62. Disimpan sebagai +62.'}
+        business_name: {type: string, minLength: 1, maxLength: 120, description: Wajib untuk tenant.}
+        category_id: {type: string, format: uuid, description: Wajib untuk tenant.}
+        organization_name: {type: string, minLength: 1, maxLength: 120, description: Wajib untuk penyelenggara.}
+        event_name: {type: string, minLength: 1, maxLength: 160, description: Wajib untuk penyelenggara. Hanya nama rencana acara pertama; acara dibuat setelah masuk.}
+    RegisterInput:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        password: {type: string, format: password, minLength: 12, description: Maximum 72 UTF-8 bytes.}
+        profile: {$ref: '#/components/schemas/SignupProfile'}
     Account:
       type: object
       required:
@@ -4463,6 +4486,8 @@ components:
           memberships:
             type: array
             items: {$ref: '#/components/schemas/Membership'}
+          phone: {type: string, description: Nomor HP dari pendaftaran, bila ada.}
+          planned_event_name: {type: string, description: Nama acara pertama yang diisi penyelenggara saat mendaftar.}
     Membership:
       type: object
       required: [subject_type, subject_id, name, role]

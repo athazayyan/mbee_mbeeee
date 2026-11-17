@@ -73,15 +73,46 @@ type credentials struct {
 
 func readCredentials(c *gin.Context) (credentials, bool) {
 	var input credentials
+	if !decodeAccountBody(c, &input) {
+		return input, false
+	}
+	return input, validCredentials(c, &input, nil)
+}
+
+type registration struct {
+	credentials
+	Profile *Signup `json:"profile"`
+}
+
+func readRegistration(c *gin.Context) (registration, bool) {
+	var input registration
+	if !decodeAccountBody(c, &input) {
+		return input, false
+	}
+	fields := make(map[string]string)
+	if input.Profile != nil {
+		fields = input.Profile.normalize()
+	}
+	return input, validCredentials(c, &input.credentials, fields)
+}
+
+func decodeAccountBody(c *gin.Context, into any) bool {
 	body := http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
 	decoder := json.NewDecoder(body)
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
+	if decoder.Decode(into) != nil || decoder.Decode(new(json.RawMessage)) != io.EOF {
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Payload akun tidak valid.", nil)
-		return input, false
+		return false
 	}
+	return true
+}
+
+// validCredentials normalizes the email and merges any extra field errors into one 422 response.
+func validCredentials(c *gin.Context, input *credentials, fields map[string]string) bool {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
-	fields := make(map[string]string)
+	if fields == nil {
+		fields = make(map[string]string)
+	}
 	address, err := mail.ParseAddress(input.Email)
 	if err != nil || address.Address != input.Email || len(input.Email) > 254 {
 		fields["email"] = "Masukkan alamat email yang valid."
@@ -90,18 +121,18 @@ func readCredentials(c *gin.Context) (credentials, bool) {
 		fields["password"] = "Gunakan minimal 12 karakter dan maksimal 72 byte."
 	}
 	if len(fields) != 0 {
-		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa email dan kata sandi.", fields)
-		return input, false
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian pendaftaran.", fields)
+		return false
 	}
-	return input, true
+	return true
 }
 
 func (h handler) register(c *gin.Context) {
-	input, ok := readCredentials(c)
+	input, ok := readRegistration(c)
 	if !ok {
 		return
 	}
-	account, err := h.service.register(c.Request.Context(), input.Email, input.Password)
+	account, err := h.service.register(c.Request.Context(), input.Email, input.Password, input.Profile)
 	if err != nil {
 		sendError(c, err)
 		return
@@ -193,6 +224,9 @@ func sendError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, errConflict):
 		httpapi.Error(c, http.StatusConflict, "ACCOUNT_CONFLICT", "Akun tidak dapat dibuat dengan email ini.", nil)
+	case errors.Is(err, errBadCategory):
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian pendaftaran.",
+			map[string]string{"category_id": "Pilih kategori usaha yang tersedia."})
 	case errors.Is(err, ErrEmailNotVerified):
 		httpapi.Error(c, http.StatusForbidden, "EMAIL_NOT_VERIFIED", "Email belum diverifikasi. Buka tautan verifikasi di emailmu atau kirim ulang.", nil)
 	case errors.Is(err, errSession):
