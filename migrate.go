@@ -77,11 +77,39 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		if err := relocateMigration(ctx, tx, 9, "00009_payments.up.sql", 16, "00016_payments.up.sql"); err != nil {
 			return err
 		}
-		// Produk dan kasir dari branch khalisha pernah memakai nomor 11 dan 12; pindahkan dulu sebelum katalog menempati 12.
-		if err := relocateMigration(ctx, tx, 12, "00012_pos_sales.up.sql", 18, "00018_pos_sales.up.sql"); err != nil {
+		// Migration branch khalisha pernah memakai nomor 11–12 lalu 17–25. Pindahkan ke 27–35 sebelum
+		// katalog menempati 12 dan migration main (aplikasi, paket, profil pendaftaran) menempati 17–26.
+		if err := relocateMigration(ctx, tx, 12, "00012_pos_sales.up.sql", 28, "00028_pos_sales.up.sql"); err != nil {
 			return err
 		}
-		if err := relocateMigration(ctx, tx, 11, "00011_products.up.sql", 17, "00017_products.up.sql"); err != nil {
+		if err := relocateMigration(ctx, tx, 11, "00011_products.up.sql", 27, "00027_products.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 17, "00017_products.up.sql", 27, "00027_products.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 18, "00018_pos_sales.up.sql", 28, "00028_pos_sales.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 19, "00019_admin_plans.up.sql", 29, "00029_admin_plans.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 20, "00020_sale_adjustments_expenses.up.sql", 30, "00030_sale_adjustments_expenses.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 21, "00021_pos_devices.up.sql", 31, "00031_pos_devices.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 22, "00022_business_reports.up.sql", 32, "00032_business_reports.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 23, "00023_notifications.up.sql", 33, "00033_notifications.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 24, "00024_conversations.up.sql", 34, "00034_conversations.up.sql"); err != nil {
+			return err
+		}
+		if err := relocateMigration(ctx, tx, 25, "00025_reviews.up.sql", 35, "00035_reviews.up.sql"); err != nil {
 			return err
 		}
 		if err := relocateMigration(ctx, tx, 10, "00010_catalog.up.sql", 12, "00012_catalog.up.sql"); err != nil {

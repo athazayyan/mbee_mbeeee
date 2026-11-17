@@ -26,7 +26,7 @@ CREATE INDEX admin_audit_actor_idx ON admin_audit (actor_id, occurred_at DESC);
 ALTER TABLE organizations ADD COLUMN verified_at timestamptz;
 
 -- Paket per acara (PRD 9.1). Harga berversi dengan effective_at agar perubahan berlaku prospektif.
-CREATE TABLE event_plan_versions (
+CREATE TABLE plan_price_versions (
     id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     effective_at timestamptz NOT NULL UNIQUE,
     -- Paket Custom: harga Large ditambah tarif ini per tenant di atas kapasitas Large.
@@ -34,8 +34,8 @@ CREATE TABLE event_plan_versions (
     created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
-CREATE TABLE event_plans (
-    version_id integer NOT NULL REFERENCES event_plan_versions (id) ON DELETE CASCADE,
+CREATE TABLE plan_prices (
+    version_id integer NOT NULL REFERENCES plan_price_versions (id) ON DELETE CASCADE,
     code text NOT NULL CHECK (code ~ '^[a-z]{2,20}$'),
     name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 40),
     capacity integer NOT NULL CHECK (capacity BETWEEN 1 AND 100000),
@@ -45,10 +45,10 @@ CREATE TABLE event_plans (
 );
 
 WITH version AS (
-    INSERT INTO event_plan_versions (effective_at, custom_price_per_tenant)
+    INSERT INTO plan_price_versions (effective_at, custom_price_per_tenant)
     VALUES ('2026-01-01T00:00:00+07:00', 5000) RETURNING id
 )
-INSERT INTO event_plans (version_id, code, name, capacity, price)
+INSERT INTO plan_prices (version_id, code, name, capacity, price)
 SELECT version.id, plan.code, plan.name, plan.capacity, plan.price FROM version, (VALUES
     ('mini', 'Mini', 20, 180000),
     ('basic', 'Basic', 30, 250000),
