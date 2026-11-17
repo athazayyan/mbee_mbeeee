@@ -24,10 +24,10 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/inventory"
-	"kitakarsa.com/tenantku/backend/internal/payment"
-	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 	"kitakarsa.com/tenantku/backend/internal/messaging"
 	"kitakarsa.com/tenantku/backend/internal/notify"
+	"kitakarsa.com/tenantku/backend/internal/payment"
+	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 	"kitakarsa.com/tenantku/backend/internal/reports"
 	"kitakarsa.com/tenantku/backend/internal/reviews"
 )
@@ -48,6 +48,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "worker" {
 		if err := runWorker(ctx, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "payments" {
+		if err := runPayments(ctx, os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return

@@ -279,12 +279,12 @@ func (s Store) openPlanAttempt(ctx context.Context, id, email string) (Attempt, 
 			result = attempt
 			return nil
 		}
-		var eventName, planName, purchaseID string
+		var eventName, planName, purchaseID, eventID, organizationID string
 		var remaining float64
-		if err := tx.QueryRow(ctx, `SELECT e.name, pl.name, p.id, EXTRACT(EPOCH FROM (a.expires_at - clock_timestamp()))::float8
+		if err := tx.QueryRow(ctx, `SELECT e.name, pl.name, p.id, e.id, e.organization_id, EXTRACT(EPOCH FROM (a.expires_at - clock_timestamp()))::float8
 			FROM payment_attempts a JOIN event_plan_purchases p ON p.id = a.purchase_id
 			JOIN events e ON e.id = p.event_id JOIN event_plans pl ON pl.code = p.plan_code
-			WHERE a.id = $1 AND p.status = 'pending'`, id).Scan(&eventName, &planName, &purchaseID, &remaining); errors.Is(err, pgx.ErrNoRows) {
+			WHERE a.id = $1 AND p.status = 'pending'`, id).Scan(&eventName, &planName, &purchaseID, &eventID, &organizationID, &remaining); errors.Is(err, pgx.ErrNoRows) {
 			return ErrPlanState
 		} else if err != nil {
 			return err
@@ -296,8 +296,12 @@ func (s Store) openPlanAttempt(ctx context.Context, id, email string) (Attempt, 
 		if len([]rune(name)) > 50 {
 			name = string([]rune(name)[:50])
 		}
-		snap, err := s.Provider.CreateSnap(ctx, id, attempt.Amount, email,
-			[]snapItem{{ID: purchaseID, Price: attempt.Amount, Quantity: 1, Name: name}}, time.Duration(remaining*float64(time.Second)))
+		snap, err := s.Provider.CreateSnap(ctx, SnapInput{
+			OrderID: id, Amount: attempt.Amount, Email: email,
+			Items:     []snapItem{{ID: purchaseID, Price: attempt.Amount, Quantity: 1, Name: name}},
+			Expiry:    time.Duration(remaining * float64(time.Second)),
+			FinishURL: s.finishURL("/penyelenggara/acara/" + eventID + "/paket?organisasi=" + organizationID),
+		})
 		if err != nil {
 			return err
 		}
@@ -351,21 +355,6 @@ func (s Store) applyPlan(ctx context.Context, tx pgx.Tx, attemptID, purchaseID, 
 		return "", err
 	}
 	return "applied", recordPlanPayment(ctx, tx, attemptID, amount)
-}
-
-func recordPlanPayment(ctx context.Context, tx pgx.Tx, attemptID string, amount int64) error {
-	var txID string
-	err := tx.QueryRow(ctx, `INSERT INTO ledger_transactions (kind, ref_type, ref_id)
-		VALUES ('plan_payment_received', 'payment_attempt', $1) ON CONFLICT DO NOTHING RETURNING id`, attemptID).Scan(&txID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO ledger_entries (transaction_id, account, direction, amount) VALUES
-		($1, 'provider_clearing', 'debit', $2), ($1, 'platform_revenue', 'credit', $2)`, txID, amount)
-	return err
 }
 
 func (s Store) planRoutes(api *gin.RouterGroup, sessions *auth.Service, origin string) {

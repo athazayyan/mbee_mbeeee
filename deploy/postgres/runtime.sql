@@ -59,17 +59,22 @@ REVOKE INSERT (event_id, revision, requested_by, reason, snapshot_before, snapsh
 REVOKE INSERT (revision_id, event_id, booking_id, status_at_proposal) ON public.event_revision_bookings FROM :"api_role";
 REVOKE INSERT (revision_id, booking_id, decided_by, decision) ON public.event_revision_decisions FROM :"api_role";
 REVOKE INSERT (revision_id, event_id, applied_by, supersedes_through) ON public.event_revision_applications FROM :"api_role";
-REVOKE SELECT (id, booking_id, purchase_id, created_by, provider, method, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
-    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
-    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts FROM :"api_role";
+REVOKE SELECT (id, booking_id, purchase_id, created_by, provider, method, status, amount, currency, checkout_url, expires_at,
+        idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version,
+        confirmed_type, confirmed_detail, created_at, updated_at),
+    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
+        rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at, confirmed_type, confirmed_detail) ON public.payment_attempts FROM :"api_role";
 REVOKE INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
     UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases FROM :"api_role";
 REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
     UPDATE (outcome, attempt_id) ON public.payment_events FROM :"api_role";
-REVOKE SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"api_role";
-REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"api_role";
-REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+REVOKE SELECT (id, attempt_id, kind, status), INSERT (attempt_id, booking_id, kind, detail), UPDATE (status)
+    ON public.payment_exceptions FROM :"api_role";
+REVOKE SELECT (id, kind, ref_type, ref_id), INSERT (kind, ref_type, ref_id, reverses) ON public.ledger_transactions FROM :"api_role";
+REVOKE SELECT (transaction_id, account, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries FROM :"api_role";
+REVOKE SELECT ON public.payment_methods FROM :"api_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
@@ -197,15 +202,20 @@ GRANT UPDATE (registration_mode) ON public.events TO :"api_role";
 GRANT SELECT (created_by), UPDATE (status) ON public.bookings TO :"api_role";
 GRANT UPDATE (status) ON public.allocations TO :"api_role";
 GRANT INSERT (booking_id, from_status, to_status, reason) ON public.booking_status_history TO :"api_role";
-GRANT SELECT (id, booking_id, purchase_id, created_by, provider, method, status, amount, currency, checkout_url, expires_at, idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
-    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
-    UPDATE (status, provider_token, checkout_url, updated_at, paid_at) ON public.payment_attempts TO :"api_role";
+GRANT SELECT (id, booking_id, purchase_id, created_by, provider, method, status, amount, currency, checkout_url, expires_at,
+        idempotency_key, request_digest, rent_amount, platform_fee_amount, provider_fee_amount, fee_version,
+        confirmed_type, confirmed_detail, created_at, updated_at),
+    INSERT (booking_id, purchase_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
+        rent_amount, platform_fee_amount, provider_fee_amount, fee_version),
+    UPDATE (status, provider_token, checkout_url, updated_at, paid_at, confirmed_type, confirmed_detail) ON public.payment_attempts TO :"api_role";
 GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
     UPDATE (outcome, attempt_id) ON public.payment_events TO :"api_role";
-GRANT SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions TO :"api_role";
-GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"api_role";
-GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+GRANT SELECT (id, attempt_id, kind, status), INSERT (attempt_id, booking_id, kind, detail), UPDATE (status)
+    ON public.payment_exceptions TO :"api_role";
+GRANT SELECT (id, kind, ref_type, ref_id), INSERT (kind, ref_type, ref_id, reverses) ON public.ledger_transactions TO :"api_role";
+GRANT SELECT (transaction_id, account, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"api_role";
+GRANT SELECT ON public.payment_methods TO :"api_role";
 \endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";

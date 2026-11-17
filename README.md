@@ -93,6 +93,8 @@ Login menolak akun yang emailnya belum diverifikasi dengan `403 EMAIL_NOT_VERIFI
 
 Migration mengisi tarif paket Mini hingga Large dan tarif dasar Custom. Custom menambah Rp5.000 per stand di atas 100. Pembelian lama tetap memakai harga dan kapasitas yang tercatat saat dibuat. Isi `EVENT_PLAN_REQUIRED=true` untuk mewajibkan paket aktif dan menegakkan kapasitas saat menyimpan denah dan menerbitkan acara. Pembelian paket berbayar memakai Midtrans Sandbox dan webhook yang sama dengan sewa stand.
 
+Metode bayar sewa (E08) dirilis lewat tabel `payment_methods`: `bca_va` (Rp4.000) dan `other_qris` (Rp0), dengan biaya admin per metode yang ditanggung tenant. Total pembayaran adalah sewa ditambah biaya admin. Tarif bawaan adalah estimasi dan harus diganti dengan tarif kontrak. `go run . payments check` memverifikasi channel di sandbox dan `go run . payments reconcile` merekonsiliasi attempt dan ledger. Detail, ledger, dan langkah uji webhook hosted ada di [docs/pembayaran-midtrans.md](docs/pembayaran-midtrans.md). Isi `MIDTRANS_CLIENT_KEY` untuk perintah `check`.
+
 Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
 
 ## Verifikasi lokal

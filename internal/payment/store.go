@@ -18,15 +18,22 @@ var (
 	ErrNotPayable          = errors.New("booking is not payable")
 	ErrIdempotencyMismatch = errors.New("idempotency key reused with a different request")
 	ErrUnavailable         = errors.New("payments are not configured")
-	ErrQuoteChanged        = errors.New("payment total requires confirmation")
-	ErrPaymentInProgress   = errors.New("a payment for this booking is already open")
+	// ErrPaymentInProgress means the previous attempt could not be closed, so a new one would risk a double charge.
+	ErrPaymentInProgress = errors.New("a payment for this booking is already in progress")
+	// ErrQuoteChanged means the total the payer confirmed no longer matches what the server computes.
+	ErrQuoteChanged = errors.New("payment total requires confirmation")
 )
+
+// legacyMethod keeps the original single-button Snap flow, which charges the booking snapshot total.
+const legacyMethod = "snap"
 
 type Store struct {
 	DB       *pgxpool.Pool
 	Provider *Midtrans
 	// PlanRequired reports whether publication needs an active plan; it is informational for clients.
 	PlanRequired bool
+	// AppOrigin is where Midtrans sends the payer after checkout. Empty leaves the provider default.
+	AppOrigin string
 }
 
 type Attempt struct {
@@ -37,50 +44,41 @@ type Attempt struct {
 	Provider    string    `json:"provider"`
 	CheckoutURL string    `json:"checkout_url,omitempty"`
 	ExpiresAt   time.Time `json:"expires_at"`
+	Method      string    `json:"method"`
+	MethodFee   int64     `json:"method_fee"`
 }
 
 type Input struct {
-	Method        string `json:"method"`
-	Description   string `json:"description"`
+	Method      string `json:"method"`
+	Description string `json:"description"`
+	// ExpectedTotal is the total the payer saw in payment-quotes. It is required for every method but snap.
 	ExpectedTotal *int64 `json:"expected_total,omitempty"`
 }
 
-const bookingFeeVersion = "midtrans-sandbox-v1"
-
-func bookingAdmin(method string) (int64, bool) {
-	switch method {
-	case "bca_va":
-		return 4000, true
-	case "other_qris":
-		return 0, true
-	default:
-		return 0, false
-	}
-}
-
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount, payment_attempts.fee_version FROM payment_attempts, payment_events, payment_exceptions,
-		ledger_transactions, ledger_entries, event_plans, event_plan_purchases LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount, payment_attempts.fee_version, payment_attempts.confirmed_type
+		FROM payment_attempts, payment_events, payment_exceptions, ledger_transactions, ledger_entries,
+		event_plans, event_plan_purchases, payment_methods LIMIT 0`)
 	return err
 }
 
-const attemptColumns = `id, status, amount, currency, provider, COALESCE(checkout_url, ''), expires_at`
+const attemptColumns = `id, status, amount, currency, provider, COALESCE(checkout_url, ''), expires_at, method, COALESCE(provider_fee_amount, 0)`
 
 func scanAttempt(row pgx.Row) (Attempt, error) {
 	var a Attempt
-	err := row.Scan(&a.ID, &a.Status, &a.Amount, &a.Currency, &a.Provider, &a.CheckoutURL, &a.ExpiresAt)
+	err := row.Scan(&a.ID, &a.Status, &a.Amount, &a.Currency, &a.Provider, &a.CheckoutURL, &a.ExpiresAt, &a.Method, &a.MethodFee)
 	return a, err
 }
 
-// CreateAttempt opens (or returns the existing) Snap payment for a held booking. The amount always
-// comes from the booking's price snapshot; the client never supplies it.
+// CreateAttempt opens (or returns the existing) Snap payment for a held booking with the chosen method.
+// The amount always comes from the booking snapshot plus the method's admin fee; the client never
+// supplies it. Choosing a different method closes the live attempt and opens a new one with a fresh fee.
 func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key string, input Input) (Attempt, bool, error) {
 	if s.Provider == nil {
 		return Attempt{}, false, ErrUnavailable
 	}
-	admin, selected := bookingAdmin(input.Method)
 	request := bookingID + "\x00" + input.Method + "\x00" + input.Description
-	if selected {
+	if input.Method != legacyMethod {
 		if input.ExpectedTotal == nil {
 			return Attempt{}, false, ErrQuoteChanged
 		}
@@ -99,7 +97,7 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		row := tx.QueryRow(ctx, `SELECT `+attemptColumns+`, request_digest, booking_id FROM payment_attempts
 			WHERE created_by = $1 AND idempotency_key = $2`, actor, key)
 		var a Attempt
-		err := row.Scan(&a.ID, &a.Status, &a.Amount, &a.Currency, &a.Provider, &a.CheckoutURL, &a.ExpiresAt, &prior, &priorBooking)
+		err := row.Scan(&a.ID, &a.Status, &a.Amount, &a.Currency, &a.Provider, &a.CheckoutURL, &a.ExpiresAt, &a.Method, &a.MethodFee, &prior, &priorBooking)
 		if err == nil {
 			if !bytes.Equal(prior, digest[:]) || priorBooking == nil || *priorBooking != bookingID {
 				return ErrIdempotencyMismatch
@@ -128,39 +126,56 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		if (status != "held" && status != "payment_pending") || !expires.After(now) || total < 1 {
 			return ErrNotPayable
 		}
-		live, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts
-			WHERE booking_id = $1 AND status IN ('created', 'pending')`, bookingID))
-		if err == nil {
-			if selected {
-				var method string
-				if err := tx.QueryRow(ctx, `SELECT method FROM payment_attempts WHERE id = $1`, live.ID).Scan(&method); err != nil {
-					return err
-				}
-				if method != input.Method || live.Amount != *input.ExpectedTotal {
-					return ErrPaymentInProgress
-				}
+		// A chosen method replaces the booking's fixed platform and provider fees with its own admin fee.
+		// The legacy snap flow still charges the snapshot total.
+		var feeVersion *string
+		if input.Method != legacyMethod {
+			method, err := enabledMethod(ctx, tx, input.Method)
+			if err != nil {
+				return err
 			}
-			result = live
-			return nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-
-		var version *string
-		if selected {
-			total, platformFee, providerFee = rent+admin, 0, admin
+			fee, err := method.Fee(rent)
+			if err != nil {
+				return err
+			}
+			total, platformFee, providerFee = rent+fee, 0, fee
 			if total < 1 || total > 9007199254740991 || total != *input.ExpectedTotal {
 				return ErrQuoteChanged
 			}
-			value := bookingFeeVersion
-			version = &value
+			feeVersion = &method.FeeVersion
 		}
+		live, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts
+			WHERE booking_id = $1 AND status IN ('created', 'pending') FOR UPDATE`, bookingID))
+		switch {
+		case err == nil && live.Method == input.Method && live.Amount == total:
+			result = live
+			return nil
+		case err == nil:
+			// A different method changes the fee and the total, so the old transaction must be closed first.
+			outcome, perr := s.Provider.Expire(ctx, live.ID)
+			if perr != nil {
+				return perr
+			}
+			if outcome == Refused {
+				// Midtrans also refuses when the transaction is already closed, which is safe to replace.
+				verified, serr := s.Provider.Status(ctx, live.ID)
+				if closed, _ := verified.outcome(); serr != nil || (closed != "failed" && closed != "expired") {
+					return ErrPaymentInProgress
+				}
+			}
+			if _, err := tx.Exec(ctx, `UPDATE payment_attempts SET status = 'expired', updated_at = clock_timestamp()
+				WHERE id = $1`, live.ID); err != nil {
+				return err
+			}
+		case !errors.Is(err, pgx.ErrNoRows):
+			return err
+		}
+
 		result, err = scanAttempt(tx.QueryRow(ctx, `INSERT INTO payment_attempts
 			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
 			rent_amount, platform_fee_amount, provider_fee_amount, fee_version)
 			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING `+attemptColumns,
-			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee, version))
+			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee, feeVersion))
 		if err != nil {
 			return err
 		}
@@ -182,6 +197,20 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 	return result, created && err == nil, err
 }
 
+func truncate(value string, limit int) string {
+	if runes := []rune(value); len(runes) > limit {
+		return string(runes[:limit])
+	}
+	return value
+}
+
+func (s Store) finishURL(path string) string {
+	if s.AppOrigin == "" {
+		return ""
+	}
+	return s.AppOrigin + path
+}
+
 func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (Attempt, error) {
 	var result Attempt
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
@@ -193,15 +222,14 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 			result = attempt
 			return nil
 		}
-		var eventName, method string
-		var rent, admin int64
+		var eventName string
+		var rent, platformFee, providerFee int64
 		var remainingSeconds float64
 		err = tx.QueryRow(ctx, `SELECT e.name, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8,
-			p.method, COALESCE(p.rent_amount, b.rent), COALESCE(p.provider_fee_amount, b.provider_fee)
-			FROM bookings b JOIN events e ON e.id = b.event_id
-			JOIN payment_attempts p ON p.booking_id = b.id
+			COALESCE(p.rent_amount, b.rent), COALESCE(p.platform_fee_amount, b.platform_fee), COALESCE(p.provider_fee_amount, b.provider_fee)
+			FROM bookings b JOIN events e ON e.id = b.event_id JOIN payment_attempts p ON p.booking_id = b.id
 			WHERE b.id = $1 AND p.id = $2 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID, id).
-			Scan(&eventName, &remainingSeconds, &method, &rent, &admin)
+			Scan(&eventName, &remainingSeconds, &rent, &platformFee, &providerFee)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPayable
 		}
@@ -211,21 +239,33 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 		if remainingSeconds <= 0 {
 			return ErrNotPayable
 		}
-		name := eventName
-		if len([]rune(name)) > 50 {
-			name = string([]rune(name)[:50])
+		if rent+platformFee+providerFee != attempt.Amount {
+			return errors.New("payment attempt amount does not match its price split")
 		}
-		items := []snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: "Sewa stand " + name}}
-		var channels []string
-		if _, selected := bookingAdmin(method); selected {
-			channels = []string{method}
-			items[0].Price = rent
-			if admin > 0 {
-				items = append(items, snapItem{ID: "payment-admin", Price: admin, Quantity: 1, Name: "Biaya admin"})
+		in := SnapInput{
+			OrderID: id, Amount: attempt.Amount, Email: email,
+			Expiry:    time.Duration(remainingSeconds * float64(time.Second)),
+			FinishURL: s.finishURL("/tenant/bookings/" + bookingID + "?pembayaran=selesai"),
+		}
+		if attempt.Method == legacyMethod {
+			in.Items = []snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: truncate("Sewa stand "+eventName, 50)}}
+		} else {
+			method, err := scanMethod(tx.QueryRow(ctx, `SELECT `+methodColumns+` FROM payment_methods WHERE code = $1`, attempt.Method))
+			if err != nil {
+				return err
+			}
+			in.Channels = method.SnapChannels
+			for _, item := range []snapItem{
+				{ID: "rent", Name: truncate("Sewa stand "+eventName, 50), Price: rent, Quantity: 1},
+				{ID: "platform_fee", Name: "Biaya layanan platform", Price: platformFee, Quantity: 1},
+				{ID: "payment-admin", Name: truncate("Biaya admin "+method.Label, 50), Price: providerFee, Quantity: 1},
+			} {
+				if item.Price > 0 {
+					in.Items = append(in.Items, item)
+				}
 			}
 		}
-		snap, err := s.Provider.CreateSnap(ctx, id, attempt.Amount, email, items,
-			time.Duration(remainingSeconds*float64(time.Second)), channels...)
+		snap, err := s.Provider.CreateSnap(ctx, in)
 		if err != nil {
 			return err
 		}
@@ -289,13 +329,14 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 		return err
 	})
 
-	var attemptID, status string
+	var attemptID, status, methodCode string
 	var bookingRef, purchaseRef *string
 	var amount int64
 	err := pgx.ErrNoRows
 	if httpapi.ValidID(n.OrderID) {
-		err = tx.QueryRow(ctx, `SELECT id, booking_id, purchase_id, status, amount FROM payment_attempts WHERE id = $1 FOR UPDATE`,
-			n.OrderID).Scan(&attemptID, &bookingRef, &purchaseRef, &status, &amount)
+		err = tx.QueryRow(ctx, `SELECT id, booking_id, purchase_id, status, amount, method
+			FROM payment_attempts WHERE id = $1 FOR UPDATE`,
+			n.OrderID).Scan(&attemptID, &bookingRef, &purchaseRef, &status, &amount, &methodCode)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "ignored", exception("unknown_order", nil, nil, map[string]any{})
@@ -315,6 +356,13 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	next, ok := n.outcome()
 	if !ok || status == "paid" {
 		return "ignored", nil
+	}
+	if n.PaymentType != "" {
+		// Bind the method the payer actually used to the attempt (E08-02).
+		if _, err := tx.Exec(ctx, `UPDATE payment_attempts SET confirmed_type = $2, confirmed_detail = NULLIF($3, '')
+			WHERE id = $1`, attemptID, n.PaymentType, n.Detail()); err != nil {
+			return "", err
+		}
 	}
 	if purchaseRef != nil {
 		return s.applyPlan(ctx, tx, attemptID, *purchaseRef, status, amount, next, exception)
@@ -338,7 +386,13 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 		if err := tx.QueryRow(ctx, `SELECT status FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).Scan(&bookingStatus); err != nil {
 			return "", err
 		}
-		if bookingStatus == "payment_pending" {
+		var replaced bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM payment_attempts
+			WHERE booking_id = $1 AND status IN ('created', 'pending'))`, bookingID).Scan(&replaced); err != nil {
+			return "", err
+		}
+		// A newer attempt (for example after switching method) keeps the booking in payment_pending.
+		if bookingStatus == "payment_pending" && !replaced {
 			err = setBookingStatus(ctx, tx, bookingID, bookingStatus, "held", "payment attempt "+next)
 		}
 		return "applied", err
@@ -352,6 +406,7 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	var bookingStatus string
 	var rent, platformFee, providerFee int64
 	var expires, now time.Time
+	// The attempt's own breakdown is what was charged; the booking snapshot only covers older attempts.
 	if err := tx.QueryRow(ctx, `SELECT b.status, COALESCE(p.rent_amount, b.rent),
 		COALESCE(p.platform_fee_amount, b.platform_fee), COALESCE(p.provider_fee_amount, b.provider_fee), b.expires_at
 		FROM bookings b JOIN payment_attempts p ON p.booking_id = b.id AND p.id = $2
@@ -360,6 +415,19 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	}
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return "", err
+	}
+	// The payer must have used the method the fee was priced for; a different one is reviewed by hand.
+	if n.PaymentType != "" {
+		if method, err := scanMethod(tx.QueryRow(ctx, `SELECT `+methodColumns+` FROM payment_methods WHERE code = $1`, methodCode)); err == nil {
+			if !method.Confirms(n.PaymentType) {
+				if err := exception("method_mismatch", &attemptID, &bookingID,
+					map[string]any{"chosen": methodCode, "paid_with": n.PaymentType}); err != nil {
+					return "", err
+				}
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
+		}
 	}
 	switch {
 	case bookingStatus == "confirmed":
@@ -378,26 +446,16 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	if tag.RowsAffected() != 1 {
 		return "", errors.New("payment confirmation requires a held allocation")
 	}
-	return "applied", recordPayment(ctx, tx, attemptID, amount, rent, platformFee, providerFee)
-}
-
-// recordPayment writes one balanced, append-only ledger transaction for a settled attempt.
-func recordPayment(ctx context.Context, tx pgx.Tx, attemptID string, total, rent, platformFee, providerFee int64) error {
-	var txID string
-	err := tx.QueryRow(ctx, `INSERT INTO ledger_transactions (kind, ref_type, ref_id)
-		VALUES ('payment_received', 'payment_attempt', $1) ON CONFLICT DO NOTHING RETURNING id`, attemptID).Scan(&txID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+	// Any other open attempt for this booking can no longer be paid validly; a late payment on it becomes a duplicate.
+	if _, err := tx.Exec(ctx, `UPDATE payment_attempts SET status = 'expired', updated_at = clock_timestamp()
+		WHERE booking_id = $1 AND id <> $2 AND status IN ('created', 'pending')`, bookingID, attemptID); err != nil {
+		return "", err
 	}
-	if err != nil {
-		return err
+	if rent+platformFee+providerFee != amount {
+		return "applied", exception("ledger_mismatch", &attemptID, &bookingID,
+			map[string]any{"amount": amount, "rent": rent, "platform_fee": platformFee, "provider_fee": providerFee})
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO ledger_entries (transaction_id, account, direction, amount)
-		SELECT $1, account, direction, amount FROM (VALUES
-			('provider_clearing', 'debit', $2::bigint), ('organizer_escrow', 'credit', $3::bigint),
-			('platform_revenue', 'credit', $4::bigint), ('provider_fee_payable', 'credit', $5::bigint)
-		) AS v(account, direction, amount) WHERE amount > 0`, txID, total, rent, platformFee, providerFee)
-	return err
+	return "applied", recordPayment(ctx, tx, attemptID, rent, platformFee, providerFee)
 }
 
 type exceptionFn func(kind string, attempt, booking *string, detail map[string]any) error

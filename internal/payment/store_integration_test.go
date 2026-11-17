@@ -32,6 +32,12 @@ func (transport snapTransport) RoundTrip(req *http.Request) (*http.Response, err
 
 func migratedStore(t *testing.T, ctx context.Context) Store {
 	t.Helper()
+	return storeWithMigrations(t, ctx, func(string) bool { return true })
+}
+
+// storeWithMigrations applies the migrations accepted by include to a fresh schema.
+func storeWithMigrations(t *testing.T, ctx context.Context, include func(name string) bool) Store {
+	t.Helper()
 	databaseURL := os.Getenv("TENANTKU_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("set TENANTKU_TEST_DATABASE_URL to run the PostgreSQL payment test")
@@ -65,7 +71,7 @@ func migratedStore(t *testing.T, ctx context.Context) Store {
 		t.Fatal(err)
 	}
 	for _, f := range files {
-		if !strings.HasSuffix(f.Name(), ".up.sql") {
+		if !strings.HasSuffix(f.Name(), ".up.sql") || !include(f.Name()) {
 			continue
 		}
 		// This deployment function is bound to public, while the fixture uses its own schema.
@@ -341,17 +347,51 @@ func TestPaymentLifecycle(t *testing.T) {
 		len(snap.ItemDetails) != 2 || snap.ItemDetails[0].Price != 30000 || snap.ItemDetails[1].Price != 4000 {
 		t.Fatalf("confirmed channel and price: %+v %+v %v", chosen, snap, err)
 	}
+	// Another method while an attempt is live replaces it, but only when the provider confirms the old
+	// transaction is closed. Here the old one is still being paid, so nothing changes.
 	total = 30000
+	expireBody := `{"status_code":"412","status_message":"Transaction status cannot be updated."}`
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Body != nil {
+			defer req.Body.Close()
+		}
+		body := `{"token":"channel","redirect_url":"https://pay.example/channel"}`
+		status := http.StatusCreated
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/expire"):
+			body, status = expireBody, http.StatusOK
+		case strings.HasSuffix(req.URL.Path, "/status"):
+			body, status = `{"status_code":"201","transaction_status":"pending"}`, http.StatusOK
+		default:
+			if err := json.NewDecoder(req.Body).Decode(&snap); err != nil {
+				return nil, err
+			}
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
 	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k8", Input{Method: "other_qris", ExpectedTotal: &total}); !errors.Is(err, ErrPaymentInProgress) {
-		t.Fatalf("opening another method while an attempt is live: %v", err)
+		t.Fatalf("switching while the old payment cannot be closed: %v", err)
 	}
-	n, raw = notify(chosen.ID, "settlement", "200", "34000.00")
+	if got := one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, chosen.ID); got != "pending" {
+		t.Fatalf("refused switch changed the live attempt to %s", got)
+	}
+	expireBody = `{"status_code":"404","status_message":"Transaction doesn't exist."}`
+	switched, created, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k8", Input{Method: "other_qris", ExpectedTotal: &total})
+	if err != nil || !created || switched.Amount != 30000 || switched.Method != "other_qris" ||
+		len(snap.EnabledPayments) != 1 || snap.EnabledPayments[0] != "other_qris" ||
+		one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, chosen.ID) != "expired" {
+		t.Fatalf("switched attempt %+v %+v %v", switched, snap, err)
+	}
+	chosen, total = switched, 30000
+	n, raw = notify(chosen.ID, "settlement", "200", "30000.00")
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
 		t.Fatal(err)
 	}
+	// QRIS carries no admin fee, so the whole payment is rent and no provider fee is booked.
 	if count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
-		WHERE t.ref_id = $1 AND ((e.account = 'organizer_escrow' AND e.amount = 30000)
-		OR (e.account = 'provider_fee_payable' AND e.amount = 4000))`, chosen.ID) != 2 {
+		WHERE t.ref_id = $1 AND e.account = 'organizer_escrow' AND e.amount = 30000`, chosen.ID) != 1 ||
+		count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE t.ref_id = $1 AND e.account = 'provider_fee_payable'`, chosen.ID) != 0 {
 		t.Fatal("settlement must use the selected quote and preserve rent")
 	}
 }

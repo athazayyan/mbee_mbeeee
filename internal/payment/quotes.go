@@ -11,10 +11,12 @@ import (
 )
 
 type bookingPaymentQuote struct {
-	Method string `json:"method"`
-	Rent   int64  `json:"rent"`
-	Admin  int64  `json:"admin"`
-	Total  int64  `json:"total"`
+	Method      string `json:"method"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Rent        int64  `json:"rent"`
+	Admin       int64  `json:"admin"`
+	Total       int64  `json:"total"`
 }
 
 func (s Store) listBookingPaymentQuotes(c *gin.Context, account auth.Account) {
@@ -44,10 +46,23 @@ func (s Store) listBookingPaymentQuotes(c *gin.Context, account auth.Account) {
 	case !payable || rent < 1 || rent > 9007199254736991:
 		httpapi.Error(c, http.StatusConflict, "BOOKING_NOT_PAYABLE", "Booking sudah tidak dapat dibayar.", nil)
 	default:
-		quotes := make([]bookingPaymentQuote, 0, 2)
-		for _, method := range []string{"bca_va", "other_qris"} {
-			admin, _ := bookingAdmin(method)
-			quotes = append(quotes, bookingPaymentQuote{Method: method, Rent: rent, Admin: admin, Total: rent + admin})
+		methods, err := enabledMethods(c.Request.Context(), s.DB)
+		if err != nil {
+			httpapi.LogInternalError(c, "payment methods failed", err)
+			httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Rincian pembayaran belum dapat dimuat.", nil)
+			return
+		}
+		quotes := make([]bookingPaymentQuote, 0, len(methods))
+		for _, method := range methods {
+			admin, err := method.Fee(rent)
+			if err != nil {
+				httpapi.Error(c, http.StatusConflict, "BOOKING_NOT_PAYABLE", "Booking sudah tidak dapat dibayar.", nil)
+				return
+			}
+			quotes = append(quotes, bookingPaymentQuote{
+				Method: method.Code, Label: method.Label, Description: method.Description,
+				Rent: rent, Admin: admin, Total: rent + admin,
+			})
 		}
 		httpapi.Success(c, http.StatusOK, quotes)
 	}
