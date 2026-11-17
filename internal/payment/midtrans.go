@@ -166,8 +166,9 @@ type Notification struct {
 	VANumbers   []struct {
 		Bank string `json:"bank"`
 	} `json:"va_numbers,omitempty"`
-	PermataVANumber string `json:"permata_va_number,omitempty"`
-	Acquirer        string `json:"acquirer,omitempty"`
+	PermataVANumber string           `json:"permata_va_number,omitempty"`
+	Acquirer        string           `json:"acquirer,omitempty"`
+	Refunds         []providerRefund `json:"refunds,omitempty"`
 }
 
 // Detail names the bank or acquirer behind PaymentType when Midtrans reports it.

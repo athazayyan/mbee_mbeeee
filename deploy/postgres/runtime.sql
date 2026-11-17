@@ -38,6 +38,19 @@ GRANT USAGE ON SCHEMA public TO :"api_role", :"worker_role";
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"api_role", :"worker_role";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
 -- Table-level revokes do not remove column grants from a previous deployment.
+REVOKE INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id)
+    ON public.admin_audit FROM :"api_role";
+REVOKE SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount, method),
+    UPDATE (cancellation_checked_at, status, paid_at, updated_at, confirmed_type, confirmed_detail) ON public.payment_attempts FROM :"worker_role";
+REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events FROM :"worker_role";
+REVOKE INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"worker_role";
+REVOKE SELECT (rent, platform_fee, provider_fee) ON public.bookings FROM :"worker_role";
+REVOKE SELECT ON public.payment_methods FROM :"worker_role";
+REVOKE UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds FROM :"worker_role";
+REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"worker_role";
+REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries FROM :"worker_role";
 REVOKE SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
     INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
         rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
@@ -127,6 +140,9 @@ GRANT SELECT ON public.event_plans, public.event_plan_purchases TO :"api_role";
 GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
     UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
+GRANT EXECUTE ON FUNCTION public.cancel_event_bookings(uuid, uuid) TO :"api_role";
+REVOKE SELECT (booking_id, amount, status) ON public.event_cancellation_refunds FROM :"api_role";
+GRANT SELECT (booking_id, amount, status) ON public.event_cancellation_refunds TO :"api_role";
 -- Produk dan stok usaha (E10): stok hanya berubah bersama baris inventory_movements.
 GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
 GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by, photo_upload_id),
@@ -219,7 +235,18 @@ GRANT SELECT (id, attempt_id, kind, status), INSERT (attempt_id, booking_id, kin
 GRANT SELECT (id, kind, ref_type, ref_id), INSERT (kind, ref_type, ref_id, reverses) ON public.ledger_transactions TO :"api_role";
 GRANT SELECT (transaction_id, account, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"api_role";
-GRANT SELECT ON public.payment_methods TO :"api_role";
+GRANT SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount, method),
+    UPDATE (cancellation_checked_at, status, paid_at, updated_at, confirmed_type, confirmed_detail) ON public.payment_attempts TO :"worker_role";
+GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events TO :"worker_role";
+GRANT INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions TO :"worker_role";
+GRANT SELECT (rent, platform_fee, provider_fee) ON public.bookings TO :"worker_role";
+GRANT SELECT ON public.event_cancellation_refunds TO :"worker_role";
+GRANT UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds TO :"worker_role";
+GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"worker_role";
+GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries TO :"worker_role";
+GRANT SELECT ON public.payment_methods TO :"api_role", :"worker_role";
 \endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";

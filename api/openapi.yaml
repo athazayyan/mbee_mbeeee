@@ -1238,12 +1238,38 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /events/{id}/cancellation-preview:
+    get:
+      tags: [Acara dan katalog]
+      operationId: getEventCancellationPreview
+      summary: Lihat perkiraan dampak pembatalan acara
+      description: Hanya pemilik organisasi acara. Nilai aktual dihitung kembali saat pembatalan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Jumlah booking terdampak dan estimasi refund
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/EventCancellationPreview'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        default: {$ref: '#/components/responses/Error'}
   /events/{id}/cancel:
     post:
       tags: [Acara dan katalog]
       operationId: cancelEvent
       summary: Batalkan acara
-      description: Pemilik organisasi dapat membatalkan draft atau acara terbit/berlangsung. Hold tanpa riwayat pembayaran dibatalkan dan stand dilepas dalam transaksi yang sama. Booking dengan pembayaran atau alokasi yang perlu penanganan mengembalikan 409 EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat.
+      description: Pemilik organisasi dapat membatalkan draft atau acara terbit/berlangsung. Booking aktif ditutup dan alokasinya dilepas dalam transaksi yang sama. Untuk booking terkonfirmasi dengan settlement tercatat, transaksi membuat satu instruksi refund sebesar 50% dari sewa snapshot. Instruksi menunggu pemrosesan provider. Data alokasi atau pembayaran yang tidak konsisten mengembalikan 409 EVENT_CANCELLATION_NEEDS_BOOKING_WORKFLOW. Pengulangan dengan alasan yang sama mengembalikan status yang tercatat.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -4324,7 +4350,7 @@ paths:
                 type: object
                 required: [data, meta]
                 properties:
-                  data: 
+                  data:
                     type: object
                     required: [unread_count]
                     properties:
@@ -6298,6 +6324,8 @@ components:
       - type: object
         properties:
           effective_at: {type: string, format: date-time}
+          quota_override_reason: {type: string, minLength: 1, maxLength: 500, description: Wajib saat admin platform yang memiliki acara mengubah kuota acara terbit.}
+          quota_base_version: {type: string, minLength: 1, description: Versi harga yang berlaku pada waktu override.}
     PricingVersion:
       type: object
       required: [event_id, price_version, effective_at, rules]
@@ -6318,6 +6346,7 @@ components:
       type: object
       required: [slots, active, latest]
       properties:
+        can_override_quotas: {type: boolean, description: Pemilik acara juga memiliki izin admin platform.}
         slots: {type: array, items: {$ref: '#/components/schemas/PricingSlot'}}
         inventory:
           type: object
@@ -6441,6 +6470,20 @@ components:
         expires_at: {type: string, format: date-time}
         price: {$ref: '#/components/schemas/BookingPrice'}
         accepted_policy_version: {type: string, minLength: 1}
+    EventCancellationPreview:
+      type: object
+      required: [held, payment_pending, refundable, refund_total]
+      properties:
+        held: {type: integer, minimum: 0}
+        payment_pending: {type: integer, minimum: 0}
+        refundable: {type: integer, minimum: 0}
+        refund_total: {type: string, pattern: '^[0-9]+$', description: Estimasi total refund dalam rupiah utuh.}
+    BookingRefund:
+      type: object
+      required: [amount, status]
+      properties:
+        amount: {$ref: '#/components/schemas/Rupiah'}
+        status: {type: string, enum: [queued, submitted, confirmed, manual_review]}
     BookingDetail:
       allOf:
       - {$ref: '#/components/schemas/Booking'}
@@ -6458,6 +6501,7 @@ components:
             description: Status acara. Status booking dilaporkan terpisah.
           created_at: {type: string, format: date-time}
           accepted_policy_version: {type: string, minLength: 1}
+          refund: {$ref: '#/components/schemas/BookingRefund'}
     BookingListItem:
       allOf:
       - {$ref: '#/components/schemas/BookingDetail'}
