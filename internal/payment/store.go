@@ -34,6 +34,8 @@ type Store struct {
 	PlanRequired bool
 	// AppOrigin is where Midtrans sends the payer after checkout. Empty leaves the provider default.
 	AppOrigin string
+	// Simulation lets a payer settle their own open attempt without paying, for the Midtrans sandbox only.
+	Simulation bool
 }
 
 type Attempt struct {

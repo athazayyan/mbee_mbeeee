@@ -22,6 +22,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/bookings/:id/payment-options", sessions.WithAccount(s.paymentOptions))
 	api.POST("/webhooks/payments/:provider", s.webhook)
 	s.planRoutes(api, sessions, origin)
+	s.simulationRoutes(api, sessions, origin)
 }
 
 func (s Store) createPayment(c *gin.Context, account auth.Account) {
