@@ -86,6 +86,14 @@ func (s Store) ApplicationRoutes(api *gin.RouterGroup, sessions *auth.Service, o
 		}
 		c.JSON(http.StatusOK, gin.H{"data": result, "meta": gin.H{}})
 	}))
+	api.GET("/events/:id/registration-mode", guard, sessions.WithAccount(func(c *gin.Context, account auth.Account) {
+		mode, err := s.RegistrationMode(c.Request.Context(), account.ID, c.Param("id"))
+		if err != nil {
+			writeApplicationError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"mode": mode}, "meta": gin.H{}})
+	}))
 	api.PUT("/events/:id/registration-mode", guard, sessions.WithAccount(func(c *gin.Context, account auth.Account) {
 		input, ok := httpapi.ReadJSON[registrationInput](c, 1024)
 		if !ok {

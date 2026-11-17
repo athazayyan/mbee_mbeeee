@@ -1631,6 +1631,37 @@ paths:
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /events/{id}/registration-mode:
+    get:
+      tags: [Kurasi dan booking]
+      operationId: getRegistrationMode
+      summary: Lihat mode pendaftaran acara
+      description: Pengguna masuk. Acara selain draft terlihat oleh siapa pun yang masuk; draft hanya oleh anggota organisasinya. Tenant memakai ini untuk memilih antara pengajuan kurasi dan pemesanan langsung.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Mode pendaftaran
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [mode]
+                    properties:
+                      mode: {type: string, enum: [direct, curated]}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
     put:
       tags: [Kurasi dan booking]
       operationId: setRegistrationMode
@@ -4886,11 +4917,13 @@ components:
         multiplier_bps: {type: integer, format: int32, minimum: 1}
     Application:
       type: object
-      required: [id, status, event_id, business_id]
+      required: [id, status, event_id, business_id, business_name, event_name]
       properties:
         id: {type: string, format: uuid}
         event_id: {type: string, format: uuid}
         business_id: {type: string, format: uuid}
+        business_name: {type: string, minLength: 1}
+        event_name: {type: string, minLength: 1}
         status: {type: string, enum: [submitted, approved, rejected, withdrawn, expired]}
         preferred_stand_ids: {type: array, items: {type: string, format: uuid}}
         reason: {type: string, minLength: 1}

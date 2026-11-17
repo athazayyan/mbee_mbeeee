@@ -24,6 +24,8 @@ type Application struct {
 	ID                string     `json:"id"`
 	EventID           string     `json:"event_id"`
 	BusinessID        string     `json:"business_id"`
+	BusinessName      string     `json:"business_name"`
+	EventName         string     `json:"event_name"`
 	Status            string     `json:"status"`
 	PreferredStandIDs []string   `json:"preferred_stand_ids"`
 	Reason            *string    `json:"reason,omitempty"`
@@ -49,7 +51,7 @@ type Offered struct {
 }
 
 // An approved application reads as expired or withdrawn once its offer booking lapses or is cancelled.
-const applicationColumns = `a.id, a.event_id, a.business_id,
+const applicationColumns = `a.id, a.event_id, a.business_id, bz.name, ev.name,
 	CASE WHEN a.status = 'approved' AND (b.status = 'expired' OR
 			(b.status IN ('held', 'payment_pending') AND b.expires_at <= statement_timestamp())) THEN 'expired'
 		WHEN a.status = 'approved' AND b.status = 'cancelled' THEN 'withdrawn'
@@ -57,11 +59,12 @@ const applicationColumns = `a.id, a.event_id, a.business_id,
 	a.preferred_stand_ids::text[], a.reason, a.booking_id,
 	CASE WHEN a.status = 'approved' THEN b.expires_at END, a.created_at`
 
-const applicationFrom = ` FROM applications a LEFT JOIN bookings b ON b.id = a.booking_id `
+const applicationFrom = ` FROM applications a JOIN businesses bz ON bz.id = a.business_id JOIN events ev ON ev.id = a.event_id
+	LEFT JOIN bookings b ON b.id = a.booking_id `
 
 func scanApplication(row pgx.Row) (Application, error) {
 	var a Application
-	err := row.Scan(&a.ID, &a.EventID, &a.BusinessID, &a.Status, &a.PreferredStandIDs, &a.Reason,
+	err := row.Scan(&a.ID, &a.EventID, &a.BusinessID, &a.BusinessName, &a.EventName, &a.Status, &a.PreferredStandIDs, &a.Reason,
 		&a.BookingID, &a.OfferExpiresAt, &a.CreatedAt)
 	if a.PreferredStandIDs == nil {
 		a.PreferredStandIDs = []string{}
@@ -338,6 +341,19 @@ func (s Store) queryApplications(ctx context.Context, tail string, id string, li
 		result = append(result, a)
 	}
 	return result, rows.Err()
+}
+
+// RegistrationMode reports how an event takes bookings. Terbit events are public; a draft is visible only to its organization.
+func (s Store) RegistrationMode(ctx context.Context, actor, eventID string) (string, error) {
+	eventID = strings.ToLower(eventID)
+	if !httpapi.ValidID(actor) || !httpapi.ValidID(eventID) {
+		return "", ErrApplicationInput
+	}
+	var mode string
+	err := s.DB.QueryRow(ctx, `SELECT e.registration_mode FROM events e WHERE e.id = $1
+		AND (e.status <> 'draft' OR EXISTS (SELECT 1 FROM memberships m
+			WHERE m.user_id = $2 AND m.organization_id = e.organization_id))`, eventID, actor).Scan(&mode)
+	return mode, err
 }
 
 // SetRegistrationMode lets the organizer choose direct booking or curated applications.
