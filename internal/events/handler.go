@@ -68,6 +68,7 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/events/:id", s.getPublicEvent)
 	api.GET("/events/:id/layout", s.getPublicLayout)
 	api.GET("/organizations/:id/events/:event_id/layout", sessions.WithAccount(s.getOrganizerLayout))
+	api.GET("/events/:id/cancellation-preview", sessions.WithAccount(s.getCancellationPreview))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))

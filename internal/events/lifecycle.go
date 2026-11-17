@@ -18,6 +18,33 @@ var errCancelReasonChanged = errors.New("event was already cancelled with a diff
 var errCancellationNeedsBookingWorkflow = errors.New("event cancellation requires booking workflow")
 var errEventNotCancellable = errors.New("event status does not allow cancellation")
 
+func (s Store) getCancellationPreview(c *gin.Context, account auth.Account) {
+	id := c.Param("id")
+	if !validResource(c, id) {
+		return
+	}
+	var preview struct {
+		Held        int64  `json:"held"`
+		Pending     int64  `json:"payment_pending"`
+		Refundable  int64  `json:"refundable"`
+		RefundTotal string `json:"refund_total"`
+	}
+	err := s.DB.QueryRow(c.Request.Context(), `SELECT count(*) FILTER (WHERE b.status = 'held'),
+		count(*) FILTER (WHERE b.status = 'payment_pending'),
+		count(*) FILTER (WHERE b.status = 'confirmed' AND b.rent / 2 > 0),
+		COALESCE(sum(b.rent / 2) FILTER (WHERE b.status = 'confirmed'), 0)::text
+		FROM events e JOIN memberships m ON m.organization_id = e.organization_id
+		LEFT JOIN bookings b ON b.event_id = e.id
+		WHERE e.id = $1 AND m.user_id = $2 AND m.role = 'owner'
+		AND e.status IN ('draft', 'published', 'live') GROUP BY e.id`, id, account.ID).
+		Scan(&preview.Held, &preview.Pending, &preview.Refundable, &preview.RefundTotal)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	httpapi.Success(c, http.StatusOK, preview)
+}
+
 type duplicateInput struct {
 	Name string `json:"name"`
 	Slug string `json:"slug"`
@@ -139,10 +166,17 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 			return err
 		}
 		if hasBookings {
-			// Holds and offers are released, unpaid payments are closed, and paid bookings are refunded (E09-05).
-			if _, err := funds.SettleCancellation(ctx, tx, id, actor); err != nil {
+			var closed bool
+			if err := tx.QueryRow(ctx, `SELECT public.cancel_event_bookings($1, $2)`, id, actor).Scan(&closed); err != nil {
 				return err
 			}
+			if !closed {
+				return errCancellationNeedsBookingWorkflow
+			}
+		}
+		// Applications still waiting for a decision can no longer be approved (E09-05).
+		if err := funds.WithdrawApplications(ctx, tx, id, actor); err != nil {
+			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO event_status_history
 			(event_id, actor_id, from_status, to_status, reason)

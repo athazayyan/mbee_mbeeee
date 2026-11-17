@@ -33,7 +33,6 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 	api.GET("/events/:id/check-ins", sessions.WithAccount(guard(s.listCheckIns)))
 	mutations.POST("/events/:id/check-ins", sessions.WithAccount(guard(s.checkIn)))
 	api.GET("/events/:id/funds", sessions.WithAccount(guard(s.organizerFunds)))
-	api.GET("/events/:id/cancellation-preview", sessions.WithAccount(guard(s.cancellationPreview)))
 	mutations.POST("/events/:id/payouts", sessions.WithAccount(guard(s.requestPayout)))
 	api.GET("/organizations/:id/bank-account", sessions.WithAccount(guard(s.getBankAccount)))
 	mutations.PUT("/organizations/:id/bank-account", sessions.WithAccount(guard(s.putBankAccount)))
@@ -129,11 +128,6 @@ func (s Store) checkIn(c *gin.Context, a auth.Account) {
 
 func (s Store) organizerFunds(c *gin.Context, a auth.Account) {
 	data, err := s.OrganizerFundsFor(c.Request.Context(), a.ID, strings.ToLower(c.Param("id")))
-	respond(c, http.StatusOK, data, err)
-}
-
-func (s Store) cancellationPreview(c *gin.Context, a auth.Account) {
-	data, err := s.PreviewCancellation(c.Request.Context(), a.ID, strings.ToLower(c.Param("id")))
 	respond(c, http.StatusOK, data, err)
 }
 

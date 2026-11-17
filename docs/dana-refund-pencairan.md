@@ -5,26 +5,31 @@ pembayaran tetap menjadi biaya transaksi, dan pencairan atas pengajuan mulai H+4
 
 ## Pembatalan acara (E09-03, E09-05)
 
-`POST /events/{id}/cancel` memanggil `funds.SettleCancellation` di dalam transaksi yang sama dengan perubahan status acara.
-Jika satu langkah gagal, acara tetap tidak berubah.
+`POST /events/{id}/cancel` memanggil `public.cancel_event_bookings` (migrasi 00038, dimiliki jalur pembayaran) dan
+`funds.WithdrawApplications` di dalam transaksi yang sama dengan perubahan status acara. Jika satu langkah gagal,
+acara tetap tidak berubah.
 
 | Booking saat acara dibatalkan | Yang terjadi |
 | --- | --- |
-| `held` (hold atau penawaran kurasi) | dibatalkan, stand dilepas |
-| `payment_pending` | dibatalkan, stand dilepas, attempt pembayaran ditutup, transaksi di provider ditutup oleh `payments process` |
-| `confirmed` | dibatalkan, stand dilepas, refund 50% dari sewa snapshot (`refunds`), dana disisihkan dari escrow |
-| pengajuan menunggu keputusan | ditarik (`withdrawn`) |
+| `held` / `payment_pending` | dibatalkan dan stand dilepas; transaksi provider yang belum dibayar ditutup worker (`ReconcileCancelledPayment`) |
+| `confirmed` | dibatalkan, stand dilepas, satu instruksi refund 50% dari sewa snapshot di `event_cancellation_refunds` |
+| pengajuan menunggu keputusan | ditarik (`withdrawn`) oleh `funds.WithdrawApplications` |
 
+- Refund pembatalan diproses worker (`EVENT_REFUND_SANDBOX_ENABLED=true`): QRIS lewat API refund Midtrans, VA BCA
+  masuk `manual_review` lalu dicatat dengan `tenantku record-va-refund`. Paket `internal/funds` hanya menampilkannya:
+  di linimasa booking tenant, di daftar refund penyelenggara, dan di antrean `/admin/dana` (baca saja, alasan
+  `event_cancelled`). Admin tidak mengonfirmasinya dari `/admin/dana`.
+- Pencairan menunggu sampai semua refund pembatalan `confirmed`. Escrow acara dikurangi refund yang sudah terkirim.
+- Refund sengketa tidak boleh melebihi sisa sewa setelah refund pembatalan (50% + sengketa <= sewa).
 - Tiap booking yang ditutup mendapat riwayat dengan alasan `event_cancelled`. Worker notifikasi (E15) mengubahnya menjadi
   pesan untuk tenant.
 - Contoh (E09-06): sewa Rp100.000 dan admin Rp2.000 menghasilkan refund Rp50.000. Admin Rp2.000 tidak dikembalikan.
-- Pembayaran yang masih masuk sesudah pembatalan menjadi exception `late_payment` lewat webhook, karena booking sudah
-  dibatalkan. Operator mengembalikannya manual.
 - `GET /events/{id}/cancellation-preview` menampilkan dampak sebelum penyelenggara mengonfirmasi.
 
-## Refund
+## Refund sengketa
 
-Status: `requested` → `refunded`, atau `manual_required` / `failed`.
+Tabel `refunds` hanya berisi refund dari keputusan sengketa. Status: `requested` → `refunded`, atau
+`manual_required` / `failed`.
 
 - `go run . payments process` mengirim refund yang `requested`. Metode dengan `refund_mode = 'api'` dikirim ke Midtrans dengan
   `refund_key` sama dengan ID refund, sehingga pengulangan tidak membayar dua kali. Balasan "tidak didukung" diperiksa lewat
@@ -90,9 +95,9 @@ mengikuti jalur refund di atas.
 ## Menjalankan
 
 ```sh
-make migrate                       # migrasi 00038
+make migrate                       # migrasi 00044 dan 00045 (00038-00042 dari jalur refund pembatalan)
 # terapkan ulang deploy/postgres/runtime.sql (-v payment_sandbox=true)
-go run . payments process          # refund dan penutupan transaksi, jalankan berkala
+go run . payments process          # refund sengketa, jalankan berkala
 ```
 
 ## Yang masih terbuka

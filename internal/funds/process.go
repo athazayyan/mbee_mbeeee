@@ -9,59 +9,25 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/payment"
 )
 
-// maxProviderTries is how often a refund or closure is retried before a person is asked to step in.
+// maxProviderTries is how often a refund is retried before a person is asked to step in.
 const maxProviderTries = 5
 
 // ProcessReport counts what one pass did.
 type ProcessReport struct {
-	ClosedTransactions int `json:"closed_transactions"`
-	Refunded           int `json:"refunded"`
-	ManualRequired     int `json:"manual_required"`
-	Retrying           int `json:"retrying"`
+	Refunded       int `json:"refunded"`
+	ManualRequired int `json:"manual_required"`
+	Retrying       int `json:"retrying"`
 }
 
-// Process does the work that must not happen inside a cancellation transaction: closing provider
-// transactions of cancelled bookings and sending refunds. Every step is idempotent, so the command can
-// run on a timer and after a crash.
+// Process sends refunds owed after dispute decisions. Refunds for a cancelled event are handled by the
+// worker in the payment package. Every step is idempotent, so the command can run on a timer and after a crash.
 func (s Store) Process(ctx context.Context) (ProcessReport, error) {
 	var report ProcessReport
 	if s.DB == nil {
 		return report, ErrUnavailable
 	}
-	if err := s.closeTransactions(ctx, &report); err != nil {
-		return report, err
-	}
 	err := s.sendRefunds(ctx, &report)
 	return report, err
-}
-
-func (s Store) closeTransactions(ctx context.Context, report *ProcessReport) error {
-	if s.Provider == nil {
-		return nil
-	}
-	rows, err := s.DB.Query(ctx, `SELECT attempt_id::text FROM payment_closures WHERE status = 'pending' ORDER BY created_at LIMIT 100`)
-	if err != nil {
-		return err
-	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		// Expired, absent, or refused all end the need to close it: a payment that is already settled reaches
-		// the webhook and becomes a late_payment exception because the booking is cancelled.
-		if _, err := s.Provider.Expire(ctx, id); err != nil {
-			if _, uerr := s.DB.Exec(ctx, `UPDATE payment_closures SET attempts = attempts + 1 WHERE attempt_id = $1`, id); uerr != nil {
-				return uerr
-			}
-			continue
-		}
-		if _, err := s.DB.Exec(ctx, `UPDATE payment_closures SET status = 'done', done_at = clock_timestamp() WHERE attempt_id = $1`, id); err != nil {
-			return err
-		}
-		report.ClosedTransactions++
-	}
-	return nil
 }
 
 func (s Store) sendRefunds(ctx context.Context, report *ProcessReport) error {
@@ -96,7 +62,7 @@ func (s Store) sendRefund(ctx context.Context, tx pgx.Tx, id string, report *Pro
 		return err
 	}
 	if r.Mode == "api" && s.Provider != nil {
-		result, err := s.Provider.Refund(ctx, attemptID, r.ID, r.Amount, "Acara dibatalkan penyelenggara")
+		result, err := s.Provider.Refund(ctx, attemptID, r.ID, r.Amount, "Sengketa diselesaikan admin")
 		switch {
 		case err == nil:
 			if _, err := confirmRefund(ctx, tx, r.ID, result.Reference, 0); err != nil {

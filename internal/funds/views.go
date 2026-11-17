@@ -91,7 +91,7 @@ func (s Store) BookingFundsFor(ctx context.Context, actor, bookingID string) (Bo
 		} else if err != pgx.ErrNoRows {
 			return err
 		}
-		refundRows, err := tx.Query(ctx, `SELECT `+refundColumns+` FROM refunds r WHERE r.booking_id = $1 ORDER BY r.created_at`, bookingID)
+		refundRows, err := tx.Query(ctx, `SELECT `+refundColumns+` FROM `+allRefunds+` WHERE r.booking_id = $1 ORDER BY r.created_at`, bookingID)
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ type OrganizerFunds struct {
 }
 
 func listRefunds(ctx context.Context, tx pgx.Tx, where string, args ...any) ([]RefundRow, error) {
-	rows, err := tx.Query(ctx, `SELECT `+refundColumns+`, z.name, e.name FROM refunds r
+	rows, err := tx.Query(ctx, `SELECT `+refundColumns+`, z.name, e.name FROM `+allRefunds+`
 		JOIN bookings b ON b.id = r.booking_id JOIN businesses z ON z.id = b.business_id JOIN events e ON e.id = r.event_id
 		WHERE `+where+` ORDER BY r.created_at DESC, r.id LIMIT 200`, args...)
 	if err != nil {

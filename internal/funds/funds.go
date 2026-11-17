@@ -14,9 +14,6 @@ import (
 )
 
 const (
-	// RefundPercent is the share of the rent snapshot returned to a tenant when the organizer cancels (PROD-03).
-	// The admin fee paid at checkout stays with the transaction.
-	RefundPercent = 50
 	// PayoutWorkingDays is how many working days after the event's last day a payout may be requested.
 	PayoutWorkingDays = 4
 	// CheckInLead is how long before the event starts that staff may check guests in.
@@ -47,7 +44,7 @@ type Store struct {
 
 func (s Store) Ready(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `SELECT 1 FROM booking_codes, check_ins, refunds, organization_bank_accounts,
-		payouts, disputes, payment_closures, non_working_days LIMIT 0`)
+		payouts, disputes, non_working_days LIMIT 0`)
 	return err
 }
 

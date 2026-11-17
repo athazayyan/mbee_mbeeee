@@ -16,7 +16,9 @@ import (
 
 type priceInput struct {
 	priceRules
-	EffectiveAt *time.Time `json:"effective_at"`
+	EffectiveAt         *time.Time `json:"effective_at"`
+	QuotaOverrideReason *string    `json:"quota_override_reason,omitempty"`
+	QuotaBaseVersion    string     `json:"quota_base_version,omitempty"`
 }
 
 type pricePreviewInput struct {
@@ -42,10 +44,11 @@ type pricedSlot struct {
 }
 
 type pricingState struct {
-	Slots     []pricedSlot      `json:"slots"`
-	Active    *priceVersion     `json:"active"`
-	Latest    *priceVersion     `json:"latest"`
-	Inventory *pricingInventory `json:"inventory,omitempty"`
+	Slots             []pricedSlot      `json:"slots"`
+	Active            *priceVersion     `json:"active"`
+	Latest            *priceVersion     `json:"latest"`
+	Inventory         *pricingInventory `json:"inventory,omitempty"`
+	CanOverrideQuotas bool              `json:"can_override_quotas"`
 }
 
 const activePricingQuery = `SELECT event_id, revision::text, effective_at, rules
@@ -62,8 +65,9 @@ func (s Store) getPricing(c *gin.Context, account auth.Account) {
 	var state pricingState
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var eventID string
-		err := tx.QueryRow(ctx, `SELECT e.id FROM events e JOIN memberships m ON e.organization_id = m.organization_id
-			WHERE e.id = $1 AND m.user_id = $2`, id, account.ID).Scan(&eventID)
+		err := tx.QueryRow(ctx, `SELECT e.id, m.role = 'owner' AND EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $2)
+			FROM events e JOIN memberships m ON e.organization_id = m.organization_id
+			WHERE e.id = $1 AND m.user_id = $2`, id, account.ID).Scan(&eventID, &state.CanOverrideQuotas)
 		if err != nil {
 			return err
 		}
@@ -131,9 +135,17 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 			if !effective.Before(value.EndsAt) {
 				return errPricingClosed
 			}
-			if err := retainPublishedQuotas(ctx, tx, id, effective, &input.priceRules); err != nil {
-				return err
+			if input.QuotaOverrideReason == nil {
+				if err := retainPublishedQuotas(ctx, tx, id, effective, &input.priceRules); err != nil {
+					return err
+				}
+			} else {
+				if err := verifyQuotaOverride(ctx, tx, account.ID, id, effective, input); err != nil {
+					return err
+				}
 			}
+		} else if input.QuotaOverrideReason != nil {
+			return fieldErrors{"quota_override_reason": "Override hanya berlaku untuk acara terbit atau berlangsung."}
 		}
 		if _, err := s.validatePriceReferences(ctx, tx, id, input.priceRules, "", ""); err != nil {
 			return err
@@ -150,9 +162,16 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 		saved, err = loadPriceVersion(ctx, tx, `INSERT INTO event_pricing_versions (event_id, revision, created_by, rules, effective_at)
 			SELECT $1, COALESCE(MAX(revision), 0) + 1, $2, $3, $4 FROM event_pricing_versions WHERE event_id = $1
 			RETURNING event_id, revision::text, effective_at, rules`, id, account.ID, input.priceRules, effective)
-		return err
+		if err != nil || input.QuotaOverrideReason == nil {
+			return err
+		}
+		return writeQuotaOverrideAudit(ctx, tx, account.ID, id, c.Writer.Header().Get("X-Request-ID"), effective, input, saved.Revision)
 	})
 	if err != nil {
+		if errors.Is(err, errQuotaOverrideForbidden) {
+			httpapi.Error(c, http.StatusForbidden, "QUOTA_OVERRIDE_FORBIDDEN", "Perubahan kuota acara terbit memerlukan izin admin platform.", nil)
+			return
+		}
 		writeError(c, err)
 		return
 	}

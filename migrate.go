@@ -119,6 +119,20 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		if err := relocateMigration(ctx, tx, 10, "00010_catalog.up.sql", 12, "00012_catalog.up.sql"); err != nil {
 			return err
 		}
+		// Dana (check-in, sengketa, pencairan) sempat memakai 37 lalu 38 sebelum main menempati 38–42.
+		if err := relocateMigration(ctx, tx, 38, "00038_funds.up.sql", 44, "00044_funds.up.sql"); err != nil {
+			return err
+		}
+		aidilAdmin, err := reconcileAidilMigrations(ctx, tx)
+		if err != nil {
+			return err
+		}
+		var existingBreakdown bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM schema_migrations WHERE version = 25 AND name = '00025_booking_payment_breakdown.up.sql'
+		)`).Scan(&existingBreakdown); err != nil {
+			return err
+		}
 
 		previous := 0
 		for _, file := range files {
@@ -149,7 +163,7 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 				return err
 			}
 
-			sql := string(content)
+			sql := mergeMigrationSQL(name, string(content), existingBreakdown, aidilAdmin)
 			legacy := false
 			if name == "00001_auth.up.sql" {
 				legacy, err = legacyAuthExists(ctx, tx)
@@ -178,6 +192,80 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		return nil
 	})
 	return applied, err
+}
+
+func reconcileAidilMigrations(ctx context.Context, tx pgx.Tx) (bool, error) {
+	for _, move := range []struct {
+		from, to int
+		name     string
+	}{
+		{27, 38, "event_cancellation_refunds"},
+		{28, 39, "event_refund_processing"},
+		{29, 40, "cancelled_payment_reconciliation"},
+		{30, 41, "manual_event_refund_receipts"},
+	} {
+		oldName := fmt.Sprintf("%05d_%s.up.sql", move.from, move.name)
+		name := fmt.Sprintf("%05d_%s.up.sql", move.to, move.name)
+		if err := relocateMigration(ctx, tx, move.from, oldName, move.to, name); err != nil {
+			return false, err
+		}
+	}
+	// The old admin migration created the same audit tables as the beginning of 00029.
+	// Keep the original ledger entry under a free version and run the remaining plan DDL.
+	const adminChecksum = "f3d1c20c6c73e29b099b9b8881a43615211ca9738dac2e2858efdb86595fbaff"
+	if _, err := tx.Exec(ctx, `UPDATE schema_migrations SET version = 43
+		WHERE version = 31 AND name = '00031_platform_admin_audit.up.sql' AND checksum = $1`, adminChecksum); err != nil {
+		return false, err
+	}
+	var adminExists bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM schema_migrations
+		WHERE version = 43 AND name = '00031_platform_admin_audit.up.sql' AND checksum = $1
+	)`, adminChecksum).Scan(&adminExists)
+	return adminExists, err
+}
+
+var (
+	ledgerAccountCheck = regexp.MustCompile(`ledger_entries_account_check\s+CHECK \(account IN\s*\([^)]*\)\)`)
+	ledgerKindCheck    = regexp.MustCompile(`ledger_transactions_kind_check\s+CHECK \(kind IN\s*\([^)]*\)\)`)
+)
+
+const (
+	ledgerAccounts = "ledger_entries_account_check CHECK (account IN ('provider_clearing', 'organizer_escrow', " +
+		"'platform_revenue', 'provider_fee_payable', 'manual_refund_cash', 'refund_payable', 'payout_payable'))"
+	ledgerKinds = "ledger_transactions_kind_check CHECK (kind IN ('payment_received', 'plan_payment_received', " +
+		"'reversal', 'event_cancellation_refund', 'refund_reserved', 'refund_issued', 'payout_reserved', 'payout_released'))"
+)
+
+// Keep published migration files and checksums intact while reconciling the two release histories.
+func mergeMigrationSQL(name, sql string, existingBreakdown, aidilAdmin bool) string {
+	switch name {
+	case "00020_payment_methods.up.sql":
+		if existingBreakdown {
+			sql = strings.Replace(sql,
+				"base_amount = b.rent + b.platform_fee, method_fee = a.amount - b.rent - b.platform_fee",
+				"base_amount = COALESCE(a.rent_amount + a.platform_fee_amount, b.rent + b.platform_fee), "+
+					"method_fee = COALESCE(a.provider_fee_amount, a.amount - b.rent - b.platform_fee)", 1)
+			sql = strings.Replace(sql, "'refund_issued', 'payout_released'", "'refund_issued', 'payout_released', 'event_cancellation_refund'", 1)
+		}
+	case "00029_admin_plans.up.sql":
+		if aidilAdmin {
+			_, remaining, _ := strings.Cut(sql, "ALTER TABLE organizations ADD COLUMN")
+			sql = "ALTER TABLE organizations ADD COLUMN" + remaining
+		}
+	case "00041_manual_event_refund_receipts.up.sql":
+		// The ledger checks of 00041, 00042 and 00044 are patched to the same union that 00045 installs,
+		// so rows written by either feature stay valid while the migrations run.
+		sql = ledgerAccountCheck.ReplaceAllString(sql, ledgerAccounts)
+	case "00042_merge_ledger_kinds.up.sql":
+		sql = ledgerKindCheck.ReplaceAllString(sql, ledgerKinds)
+	case "00044_funds.up.sql":
+		sql = ledgerKindCheck.ReplaceAllString(ledgerAccountCheck.ReplaceAllString(sql, ledgerAccounts), ledgerKinds)
+	case "00039_event_refund_processing.up.sql":
+		// The combined ledger check is installed by 00042.
+		sql, _, _ = strings.Cut(sql, "ALTER TABLE ledger_transactions")
+	}
+	return sql
 }
 
 // Relocate an exact migration that was already applied under a colliding version.

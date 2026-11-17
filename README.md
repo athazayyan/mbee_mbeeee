@@ -95,9 +95,13 @@ Migration mengisi tarif paket Mini hingga Large dan tarif dasar Custom. Custom m
 
 Metode bayar sewa (E08) dirilis lewat tabel `payment_methods`: `bca_va` (Rp4.000) dan `other_qris` (Rp0), dengan biaya admin per metode yang ditanggung tenant. Total pembayaran adalah sewa ditambah biaya admin. Tarif bawaan adalah estimasi dan harus diganti dengan tarif kontrak. `go run . payments check` memverifikasi channel di sandbox dan `go run . payments reconcile` merekonsiliasi attempt dan ledger. Detail, ledger, dan langkah uji webhook hosted ada di [docs/pembayaran-midtrans.md](docs/pembayaran-midtrans.md). Isi `MIDTRANS_CLIENT_KEY` untuk perintah `check`.
 
-Check-in, refund pembatalan 50%, sengketa, dan pencairan dana (E09) ada di paket `internal/funds`. Jalankan `go run . payments process` secara berkala untuk mengirim refund dan menutup transaksi provider milik booking yang dibatalkan. Pencairan dan refund manual dikonfirmasi admin di `/admin/dana`. Kebijakan, ledger, dan runbook ada di [docs/dana-refund-pencairan.md](docs/dana-refund-pencairan.md).
+Check-in, refund pembatalan 50%, sengketa, dan pencairan dana (E09) ada di paket `internal/funds`. Refund pembatalan acara diproses worker (jalur `event_cancellation_refunds`); `go run . payments process` secara berkala mengirim refund hasil sengketa. Pencairan dan refund sengketa manual dikonfirmasi admin di `/admin/dana`. Kebijakan, ledger, dan runbook ada di [docs/dana-refund-pencairan.md](docs/dana-refund-pencairan.md).
 
 Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
+
+Untuk memproses instruksi refund pembatalan di sandbox, pasang konfigurasi Midtrans yang sama pada worker dan set `EVENT_REFUND_SANDBOX_ENABLED=true`. Worker mengirim refund parsial QRIS dengan referensi yang stabil, lalu menunggu konfirmasi bank dari hasil pengecekan provider sebelum mencatat jurnal. Metode seperti VA masuk status `manual_review` untuk tindak lanjut operasional.
+
+Setelah transfer eksternal untuk BCA VA dikonfirmasi dan bukti bank tersedia, operator database dapat mencatatnya dengan `go run . record-va-refund <booking-id> <nominal-idr> <referensi-bank>`. Perintah hanya mencatat transfer yang sudah selesai. Gunakan role operator yang diizinkan menulis bukti dan jurnal. Role runtime API serta worker tidak mendapat akses untuk mencatat bukti transfer. Percobaan ulang dengan nominal dan referensi yang sama aman.
 
 ## Verifikasi lokal
 

@@ -24,19 +24,25 @@ type Price struct {
 }
 
 type Booking struct {
-	ID            string    `json:"booking_id"`
-	BusinessID    string    `json:"business_id"`
-	EventID       string    `json:"event_id"`
-	EventName     string    `json:"event_name"`
-	EventStatus   string    `json:"event_status"`
-	StandID       string    `json:"stand_id"`
-	SlotID        string    `json:"event_slot_id"`
-	Status        string    `json:"status"`
-	ExpiresAt     time.Time `json:"expires_at"`
-	CreatedAt     time.Time `json:"created_at"`
-	PolicyVersion string    `json:"accepted_policy_version"`
-	Price         Price     `json:"price"`
-	ServerNow     time.Time `json:"-"`
+	ID            string         `json:"booking_id"`
+	BusinessID    string         `json:"business_id"`
+	EventID       string         `json:"event_id"`
+	EventName     string         `json:"event_name"`
+	EventStatus   string         `json:"event_status"`
+	StandID       string         `json:"stand_id"`
+	SlotID        string         `json:"event_slot_id"`
+	Status        string         `json:"status"`
+	ExpiresAt     time.Time      `json:"expires_at"`
+	CreatedAt     time.Time      `json:"created_at"`
+	PolicyVersion string         `json:"accepted_policy_version"`
+	Price         Price          `json:"price"`
+	Refund        *bookingRefund `json:"refund,omitempty"`
+	ServerNow     time.Time      `json:"-"`
+}
+
+type bookingRefund struct {
+	Amount int64  `json:"amount"`
+	Status string `json:"status"`
 }
 
 type bookingListItem struct {
@@ -56,14 +62,21 @@ func (s Store) Ready(ctx context.Context) error {
 }
 
 func (s Store) detail(ctx context.Context, actor, id string) (Booking, error) {
-	row := s.DB.QueryRow(ctx, `SELECT `+bookingColumns+` FROM bookings b
+	row := s.DB.QueryRow(ctx, `SELECT `+bookingColumns+`, r.amount, r.status FROM bookings b
 		JOIN allocations a ON a.booking_id = b.id
 		JOIN events e ON e.id = b.event_id
+		LEFT JOIN event_cancellation_refunds r ON r.booking_id = b.id
 		WHERE b.id = $1 AND EXISTS (
 			SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.role = 'owner'
 			AND (m.business_id = b.business_id OR m.organization_id = e.organization_id)
 		)`, id, actor)
-	return scanBooking(row)
+	var amount *int64
+	var status *string
+	booking, err := scanBooking(row, &amount, &status)
+	if err == nil && amount != nil && status != nil {
+		booking.Refund = &bookingRefund{Amount: *amount, Status: *status}
+	}
+	return booking, err
 }
 
 func (s Store) list(ctx context.Context, actor, businessID string, before time.Time, beforeID *string, limit int, pendingOnly bool) ([]bookingListItem, time.Time, error) {

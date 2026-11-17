@@ -207,11 +207,14 @@ func payoutState(ctx context.Context, tx pgx.Tx, eventID string) (PayoutState, s
 		WHERE e.account = 'organizer_escrow' AND (
 			(t.ref_type = 'payment_attempt' AND t.ref_id IN (SELECT a.id FROM payment_attempts a JOIN bookings b ON b.id = a.booking_id WHERE b.event_id = $1))
 			OR (t.ref_type IN ('refund', 'refund_fee') AND t.ref_id IN (SELECT id FROM refunds WHERE event_id = $1))
+			OR (t.kind = 'event_cancellation_refund' AND t.ref_type = 'booking' AND t.ref_id IN (SELECT id FROM bookings WHERE event_id = $1))
 			OR (t.ref_type = 'payout' AND t.ref_id IN (SELECT id FROM payouts WHERE event_id = $1)))`, eventID).Scan(&state.Available); err != nil {
 		return state, "", err
 	}
 	var open bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM refunds WHERE event_id = $1 AND status <> 'refunded')`, eventID).Scan(&open); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM refunds WHERE event_id = $1 AND status <> 'refunded')
+		OR EXISTS (SELECT 1 FROM event_cancellation_refunds c JOIN bookings b ON b.id = c.booking_id
+			WHERE b.event_id = $1 AND c.status <> 'confirmed')`, eventID).Scan(&open); err != nil {
 		return state, "", err
 	}
 	if open {

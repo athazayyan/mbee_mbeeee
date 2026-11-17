@@ -180,18 +180,55 @@ func (s Store) escrow(t *testing.T, ctx context.Context) map[string]int64 {
 	return out
 }
 
-func cancel(t *testing.T, ctx context.Context, s Store, w *world) (Settlement, error) {
+// cancelEvent does what public.cancel_event_bookings does for the funds module (that function is bound to the
+// public schema, so the fixture schema cannot call it): bookings cancelled and released, and a 50% refund
+// instruction for every paid booking.
+func cancelEvent(t *testing.T, ctx context.Context, s Store, w *world) {
 	t.Helper()
-	var out Settlement
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE events SET status = 'cancelled' WHERE id = $1`, w.event); err != nil {
-			return err
+		for _, q := range []string{
+			`UPDATE events SET status = 'cancelled' WHERE id = $1`,
+			`INSERT INTO event_cancellation_refunds (booking_id, payment_attempt_id, requested_by, amount, refund_policy_version)
+				SELECT b.id, p.id, $2, b.rent / 2, b.refund_policy_version FROM bookings b
+				JOIN payment_attempts p ON p.booking_id = b.id AND p.status = 'paid'
+				WHERE b.event_id = $1 AND b.status = 'confirmed' ON CONFLICT DO NOTHING`,
+			`UPDATE allocations SET status = 'released' WHERE booking_id IN (SELECT id FROM bookings WHERE event_id = $1)`,
+			`UPDATE bookings SET status = 'cancelled' WHERE event_id = $1`,
+		} {
+			args := []any{w.event}
+			if strings.Contains(q, "$2") {
+				args = append(args, w.owner)
+			}
+			if _, err := tx.Exec(ctx, q, args...); err != nil {
+				return err
+			}
 		}
-		var err error
-		out, err = SettleCancellation(ctx, tx, w.event, w.owner)
+		return WithdrawApplications(ctx, tx, w.event, w.owner)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// confirmCancellationRefund books what payment.confirmCancellationRefund books once the provider has paid.
+func confirmCancellationRefund(t *testing.T, ctx context.Context, s Store, booking string) {
+	t.Helper()
+	exec(t, ctx, s, `WITH t AS (INSERT INTO ledger_transactions (kind, ref_type, ref_id) VALUES ('event_cancellation_refund', 'booking', $1) RETURNING id),
+		e AS (INSERT INTO ledger_entries (transaction_id, account, direction, amount)
+			SELECT t.id, x.account, x.direction, 50000 FROM t, (VALUES ('organizer_escrow', 'debit'), ('provider_clearing', 'credit')) AS x(account, direction))
+		UPDATE event_cancellation_refunds SET status = 'confirmed', confirmed_at = clock_timestamp() WHERE booking_id = $1`, booking)
+}
+
+// request owes a dispute refund of 50.000 on a paid booking.
+func request(t *testing.T, ctx context.Context, s Store, booking string) {
+	t.Helper()
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		_, _, err := requestRefund(ctx, tx, booking, "dispute", 50000)
 		return err
 	})
-	return out, err
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 type fakeProvider struct {
@@ -221,8 +258,72 @@ func (f *fakeProvider) handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// T08: the organizer cancels. With rent Rp100.000 and an admin fee of Rp2.000 the tenant gets Rp50.000 back.
-func TestCancellationRefundsHalfTheRent(t *testing.T) {
+// T08: the organizer cancels. The payment package owns the refund (50% of the Rp100.000 rent, never the Rp2.000 admin
+// fee); the funds module withdraws waiting applications and keeps the refund visible and the payout blocked.
+func TestCancellationFundsView(t *testing.T) {
+	ctx, cancelCtx := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancelCtx()
+	s := migrated(t, ctx)
+	w := newWorld(t, ctx, s, time.Now().Add(-5*24*time.Hour))
+	paid, _ := w.paid(t, ctx, s, "gopay", 100000, 2000)
+	hold := w.booking(t, ctx, s, "held", "hold", 100000)
+	exec(t, ctx, s, `INSERT INTO applications (event_id, business_id, submitted_by) VALUES ($1, $2, $3)`, w.event, w.business, w.tenant)
+
+	cancelEvent(t, ctx, s, w)
+	cancelEvent(t, ctx, s, w) // calling again changes nothing
+	if one(t, ctx, s, `SELECT status FROM applications LIMIT 1`) != "withdrawn" ||
+		num(t, ctx, s, `SELECT count(*) FROM application_status_history WHERE reason = 'event_cancelled'`) != 1 {
+		t.Fatal("waiting application was not withdrawn exactly once")
+	}
+	if num(t, ctx, s, `SELECT count(*) FROM event_cancellation_refunds`) != 1 || num(t, ctx, s, `SELECT amount FROM event_cancellation_refunds WHERE booking_id = $1`, paid) != 50000 {
+		t.Fatal("only the paid booking is refunded, for half the rent")
+	}
+
+	// The tenant sees the refund in the timeline in the funds-module shape; the unpaid hold has none.
+	view, err := s.BookingFundsFor(ctx, w.tenant, paid)
+	if err != nil || len(view.Refunds) != 1 || view.Refunds[0].Reason != "event_cancelled" || view.Refunds[0].Amount != 50000 ||
+		view.Refunds[0].RentAmount != 100000 || view.Refunds[0].Status != "requested" {
+		t.Fatalf("refund in the booking timeline: %+v %v", view.Refunds, err)
+	}
+	if other, err := s.BookingFundsFor(ctx, w.tenant, hold); err != nil || len(other.Refunds) != 0 {
+		t.Fatalf("unpaid booking shows a refund: %+v %v", other.Refunds, err)
+	}
+
+	// A dispute cannot return more than the rent once half of it is already being refunded.
+	if err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		_, _, err := requestRefund(ctx, tx, paid, "dispute", 60000)
+		return err
+	}); !errors.Is(err, ErrAmountTooHigh) {
+		t.Fatalf("dispute refund above the remaining rent: %v", err)
+	}
+
+	// The payout waits while the refund is open, and counts it once the provider has paid.
+	state, err := s.PayoutStateFor(ctx, w.owner, w.event)
+	if err != nil || state.Eligible || state.Available != 100000 {
+		t.Fatalf("payout state with an open refund: %+v %v", state, err)
+	}
+	blocked := false
+	for _, b := range state.Blockers {
+		blocked = blocked || b == BlockedOpenRefund
+	}
+	if !blocked {
+		t.Fatalf("an open cancellation refund must block the payout: %v", state.Blockers)
+	}
+	confirmCancellationRefund(t, ctx, s, paid)
+	state, err = s.PayoutStateFor(ctx, w.owner, w.event)
+	if err != nil || state.Available != 50000 {
+		t.Fatalf("escrow after the refund: %+v %v", state, err)
+	}
+	for _, b := range state.Blockers {
+		if b == BlockedOpenRefund {
+			t.Fatalf("a confirmed refund must not block the payout: %v", state.Blockers)
+		}
+	}
+	s.escrow(t, ctx) // the ledger still balances
+}
+
+// Dispute refunds: the provider refunds API methods once, virtual accounts wait for a person.
+func TestDisputeRefundProcessing(t *testing.T) {
 	ctx, cancelCtx := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancelCtx()
 	s := migrated(t, ctx)
@@ -236,56 +337,22 @@ func TestCancellationRefundsHalfTheRent(t *testing.T) {
 
 	api, apiAttempt := w.paid(t, ctx, s, "gopay", 100000, 2000) // refundable through the provider API
 	manual, _ := w.paid(t, ctx, s, "bca_va", 100000, 2000)      // a virtual account has to be paid back by hand
-	hold := w.booking(t, ctx, s, "held", "hold", 100000)        // not paid: simply released
-	offer := w.booking(t, ctx, s, "held", "offer", 100000)      // a curated offer: also released
-	pending := w.booking(t, ctx, s, "payment_pending", "hold", 100000)
-	exec(t, ctx, s, `INSERT INTO payment_attempts (booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
-		rent_amount, platform_fee_amount, provider_fee_amount) VALUES ($1, $2, 'midtrans', 'bca_va', 'pending', 104000, now() + interval '1 hour', 'p1',
-		decode(repeat('00', 32), 'hex'), 100000, 0, 4000)`, pending, w.tenant)
-	exec(t, ctx, s, `INSERT INTO applications (event_id, business_id, submitted_by) VALUES ($1, $2, $3)`, w.event, w.business, w.tenant)
 
 	before := s.escrow(t, ctx)
-	settled, err := cancel(t, ctx, s, w)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settled.ClosedHolds != 2 || settled.ClosedPending != 1 || settled.Refunds != 2 || settled.RefundTotal != 100000 {
-		t.Fatalf("settlement %+v", settled)
-	}
-	for _, id := range []string{api, manual, hold, offer, pending} {
-		if one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, id) != "cancelled" ||
-			one(t, ctx, s, `SELECT status FROM allocations WHERE booking_id = $1`, id) != "released" ||
-			num(t, ctx, s, `SELECT count(*) FROM booking_status_history WHERE booking_id = $1 AND to_status = 'cancelled' AND reason = 'event_cancelled'`, id) != 1 {
-			t.Fatalf("booking %s not closed and released", id)
-		}
-	}
-	// Exactly Rp50.000 of Rp100.000 rent, whatever the admin fee was.
-	if num(t, ctx, s, `SELECT amount FROM refunds WHERE booking_id = $1`, api) != 50000 || num(t, ctx, s, `SELECT rent_amount FROM refunds WHERE booking_id = $1`, api) != 100000 {
-		t.Fatal("refund must be 50% of the rent snapshot")
-	}
-	// The unpaid payment is closed locally and queued to be closed at the provider; no refund exists for it.
-	if one(t, ctx, s, `SELECT status FROM payment_attempts WHERE booking_id = $1`, pending) != "expired" ||
-		num(t, ctx, s, `SELECT count(*) FROM payment_closures WHERE status = 'pending'`) != 1 ||
-		num(t, ctx, s, `SELECT count(*) FROM refunds WHERE booking_id IN ($1, $2, $3)`, hold, offer, pending) != 0 {
-		t.Fatal("pending payment was not closed correctly")
-	}
-	if one(t, ctx, s, `SELECT status FROM applications LIMIT 1`) != "withdrawn" {
-		t.Fatal("waiting application was not withdrawn")
+	request(t, ctx, s, api)
+	request(t, ctx, s, manual)
+	request(t, ctx, s, api) // repeating the request changes nothing
+	if num(t, ctx, s, `SELECT count(*) FROM refunds`) != 2 {
+		t.Fatal("a refund must be requested once per booking and reason")
 	}
 	// The refund is reserved out of escrow now; the admin fee is untouched.
 	after := s.escrow(t, ctx)
 	if after["organizer_escrow"]-before["organizer_escrow"] != 100000 || after["refund_payable"] != -100000 || after["provider_fee_payable"] != -4000 {
-		t.Fatalf("ledger after cancellation: before %v after %v", before, after)
-	}
-	// Cancelling again changes nothing.
-	again, err := cancel(t, ctx, s, w)
-	if err != nil || again.Refunds != 0 || num(t, ctx, s, `SELECT count(*) FROM refunds`) != 2 || s.escrow(t, ctx)["refund_payable"] != -100000 {
-		t.Fatalf("second settlement %+v %v", again, err)
+		t.Fatalf("ledger after reserving: before %v after %v", before, after)
 	}
 
-	// Processing: the provider refunds the gopay payment once; the virtual account waits for a person.
 	report, err := s.Process(ctx)
-	if err != nil || report.Refunded != 1 || report.ManualRequired != 1 || report.ClosedTransactions != 1 {
+	if err != nil || report.Refunded != 1 || report.ManualRequired != 1 {
 		t.Fatalf("process %+v %v", report, err)
 	}
 	if len(fake.refunds) != 1 || fake.refunds[0] != apiAttempt {
@@ -327,23 +394,19 @@ func TestCancellationRefundsHalfTheRent(t *testing.T) {
 
 	// A provider that refuses the refund sends it to a person instead of losing it.
 	w2 := newWorld2(t, ctx, s, w)
-	_, attempt2 := w2.paid(t, ctx, s, "gopay", 100000, 2000)
+	paid2, attempt2 := w2.paid(t, ctx, s, "gopay", 100000, 2000)
 	fake.refund = `{"status_code":"412","status_message":"Merchant cannot modify status of the transaction."}`
 	fake.status = `{"order_id":"x","transaction_status":"settlement"}`
-	if _, err := cancel(t, ctx, s, w2); err != nil {
-		t.Fatal(err)
-	}
+	request(t, ctx, s, paid2)
 	report, err = s.Process(ctx)
 	if err != nil || report.ManualRequired != 1 || report.Refunded != 0 || fake.refunds[len(fake.refunds)-1] != attempt2 {
 		t.Fatalf("unsupported refund %+v %v", report, err)
 	}
 	// A refund the provider already made (the retry after a lost reply) is recognised, not asked for again.
 	w3 := newWorld2(t, ctx, s, w)
-	_, attempt3 := w3.paid(t, ctx, s, "gopay", 100000, 2000)
+	paid3, attempt3 := w3.paid(t, ctx, s, "gopay", 100000, 2000)
 	fake.status = `{"order_id":"` + attempt3 + `","status_code":"200","transaction_status":"partial_refund"}`
-	if _, err := cancel(t, ctx, s, w3); err != nil {
-		t.Fatal(err)
-	}
+	request(t, ctx, s, paid3)
 	report, err = s.Process(ctx)
 	if err != nil || report.Refunded != 1 {
 		t.Fatalf("duplicate refund %+v %v", report, err)
@@ -682,9 +745,6 @@ func TestCodeNormalization(t *testing.T) {
 		if _, ok := NormalizeCode(in); ok {
 			t.Errorf("%q accepted", in)
 		}
-	}
-	if CancellationRefund(100000) != 50000 || CancellationRefund(33333) != 16666 || CancellationRefund(1) != 0 {
-		t.Error("refund share")
 	}
 }
 

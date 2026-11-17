@@ -29,15 +29,23 @@ type Refund struct {
 const refundColumns = `r.id::text, r.booking_id::text, r.event_id::text, r.reason, r.amount, r.rent_amount, r.fee_amount,
 	r.mode, r.status, r.provider_ref, r.failure, r.created_at, r.refunded_at`
 
+// allRefunds lists dispute refunds together with the refunds of cancelled events, which the payment package
+// owns (event_cancellation_refunds). Cancellation refunds are shown in the funds-module shape and read-only.
+const allRefunds = `(SELECT id, booking_id, event_id, reason, amount, rent_amount, fee_amount, mode, status,
+		provider_ref, failure, created_at, refunded_at FROM refunds
+	UNION ALL
+	SELECT c.booking_id, c.booking_id, b.event_id, 'event_cancelled'::text, c.amount, b.rent, 0::bigint,
+		CASE WHEN c.status = 'manual_review' THEN 'manual' ELSE 'api' END,
+		CASE c.status WHEN 'confirmed' THEN 'refunded' WHEN 'manual_review' THEN 'manual_required' ELSE 'requested' END,
+		NULL::text, NULL::text, c.requested_at, c.confirmed_at
+	FROM event_cancellation_refunds c JOIN bookings b ON b.id = c.booking_id) r`
+
 func scanRefund(row pgx.Row) (Refund, error) {
 	var r Refund
 	err := row.Scan(&r.ID, &r.BookingID, &r.EventID, &r.Reason, &r.Amount, &r.RentAmount, &r.Fee, &r.Mode, &r.Status,
 		&r.ProviderRef, &r.Failure, &r.CreatedAt, &r.RefundedAt)
 	return r, err
 }
-
-// CancellationRefund is the share of the rent snapshot a tenant gets back when the organizer cancels.
-func CancellationRefund(rent int64) int64 { return rent * RefundPercent / 100 }
 
 // requestRefund owes a tenant money back and sets it aside from the organizer's escrow, in the caller's transaction.
 // The refund is tied to the booking's paid attempt, and the total refunded for a booking never exceeds its rent.
@@ -55,8 +63,9 @@ func requestRefund(ctx context.Context, tx pgx.Tx, bookingID, reason string, amo
 		return Refund{}, false, err
 	}
 	var refunded int64
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM refunds
-		WHERE booking_id = $1 AND status <> 'failed'`, bookingID).Scan(&refunded); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT
+			COALESCE((SELECT SUM(amount) FROM refunds WHERE booking_id = $1 AND status <> 'failed'), 0)
+			+ COALESCE((SELECT amount FROM event_cancellation_refunds WHERE booking_id = $1), 0)`, bookingID).Scan(&refunded); err != nil {
 		return Refund{}, false, err
 	}
 	existing, err := scanRefund(tx.QueryRow(ctx, `SELECT `+refundColumns+` FROM refunds r WHERE r.booking_id = $1 AND r.reason = $2`, bookingID, reason))
