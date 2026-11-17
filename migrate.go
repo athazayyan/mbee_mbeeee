@@ -112,6 +112,10 @@ func applyMigrations(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		if err := relocateMigration(ctx, tx, 25, "00025_reviews.up.sql", 35, "00035_reviews.up.sql"); err != nil {
 			return err
 		}
+		// Unggahan sempat memakai 36 sebelum main menempatinya dengan rincian biaya pembayaran.
+		if err := relocateMigration(ctx, tx, 36, "00036_uploads.up.sql", 37, "00037_uploads.up.sql"); err != nil {
+			return err
+		}
 		if err := relocateMigration(ctx, tx, 10, "00010_catalog.up.sql", 12, "00012_catalog.up.sql"); err != nil {
 			return err
 		}
