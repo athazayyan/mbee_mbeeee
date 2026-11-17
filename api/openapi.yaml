@@ -6665,9 +6665,10 @@ components:
         editable_until: {type: string, format: date-time, description: Hanya untuk ulasan milik pihak pemanggil.}
     BookingReviews:
       type: object
-      required: [side, eligible]
+      required: [side, event_name, eligible]
       properties:
         side: {type: string, enum: [business, organization]}
+        event_name: {type: string}
         eligible: {type: boolean}
         reason: {type: string, enum: [event_cancelled, booking_not_confirmed, event_not_finished]}
         mine: {$ref: '#/components/schemas/Review'}

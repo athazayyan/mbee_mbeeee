@@ -84,9 +84,9 @@ func scanReview(row pgx.Row) (Review, error) {
 }
 
 type bookingContext struct {
-	event, business, organization, side string
-	bookingStatus, eventStatus          string
-	eventEnds, now                      time.Time
+	event, eventName, business, organization, side string
+	bookingStatus, eventStatus                     string
+	eventEnds, now                                 time.Time
 }
 
 // loadBooking mengembalikan konteks booking dan pihak pemanggil. Bukan peserta booking: tidak ditemukan.
@@ -94,13 +94,13 @@ type bookingContext struct {
 func loadBooking(ctx context.Context, tx pgx.Tx, user, booking string) (bookingContext, error) {
 	var value bookingContext
 	var side *string
-	err := tx.QueryRow(ctx, `SELECT b.event_id::text, b.business_id::text, e.organization_id::text, b.status, e.status,
+	err := tx.QueryRow(ctx, `SELECT b.event_id::text, e.name, b.business_id::text, e.organization_id::text, b.status, e.status,
 		e.ends_at, transaction_timestamp(), CASE
 			WHEN EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.business_id = b.business_id) THEN 'business'
 			WHEN EXISTS (SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.organization_id = e.organization_id) THEN 'organization'
 		END
 		FROM bookings b JOIN events e ON e.id = b.event_id WHERE b.id = $1`, booking, user).
-		Scan(&value.event, &value.business, &value.organization, &value.bookingStatus, &value.eventStatus,
+		Scan(&value.event, &value.eventName, &value.business, &value.organization, &value.bookingStatus, &value.eventStatus,
 			&value.eventEnds, &value.now, &side)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && side == nil) {
 		return value, errNotFound
@@ -115,6 +115,7 @@ func loadBooking(ctx context.Context, tx pgx.Tx, user, booking string) (bookingC
 // BookingReviews adalah keadaan ulasan satu booking dari sudut pandang pemanggil.
 type BookingReviews struct {
 	Side        string  `json:"side"`
+	EventName   string  `json:"event_name"`
 	Eligible    bool    `json:"eligible"`
 	Reason      *string `json:"reason,omitempty"`
 	Mine        *Review `json:"mine,omitempty"`
@@ -129,6 +130,7 @@ func (s Store) forBooking(ctx context.Context, user, booking string) (BookingRev
 			return err
 		}
 		result.Side = info.side
+		result.EventName = info.eventName
 		if reason := eligibility(info.bookingStatus, info.eventStatus, info.eventEnds, info.now); reason != "" {
 			result.Reason = &reason
 		} else {
