@@ -133,6 +133,8 @@ GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
     UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_event_bookings(uuid, uuid) TO :"api_role";
+REVOKE SELECT (booking_id, amount, status) ON public.event_cancellation_refunds FROM :"api_role";
+GRANT SELECT (booking_id, amount, status) ON public.event_cancellation_refunds TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";
