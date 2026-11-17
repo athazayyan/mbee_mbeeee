@@ -124,8 +124,12 @@ GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
 -- Produk dan stok usaha (E10): stok hanya berubah bersama baris inventory_movements.
 GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
-GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
-    UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at) ON public.products TO :"api_role";
+GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by, photo_upload_id),
+    UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at, photo_upload_id) ON public.products TO :"api_role";
+-- Unggahan (E10): intent dibuat API, lalu hanya status pemeriksaan yang berubah.
+GRANT SELECT ON public.uploads TO :"api_role";
+GRANT INSERT (id, purpose, owner_type, owner_id, content_type, size_bytes, storage_key, created_by, expires_at),
+    UPDATE (status, reject_reason, completed_at) ON public.uploads TO :"api_role";
 GRANT INSERT (business_id, product_id, delta, reason, note, actor_id, sale_ref, adjustment_ref) ON public.inventory_movements TO :"api_role";
 -- Koreksi penjualan dan pengeluaran (E10-05): append-only, tanpa UPDATE atau DELETE untuk role API.
 GRANT SELECT ON public.sale_adjustments, public.sale_adjustment_items, public.expenses TO :"api_role";
