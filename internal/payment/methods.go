@@ -30,16 +30,17 @@ type Method struct {
 	FeeFlat      int64
 	FeeBPS       int
 	FeeSource    string
+	FeeVersion   string
 	RefundMode   string
 	SortOrder    int
 }
 
-const methodColumns = `code, label, description, snap_channels, confirm_types, fee_flat, fee_bps, fee_source, refund_mode, sort_order`
+const methodColumns = `code, label, description, snap_channels, confirm_types, fee_flat, fee_bps, fee_source, fee_version, refund_mode, sort_order`
 
 func scanMethod(row pgx.Row) (Method, error) {
 	var m Method
 	err := row.Scan(&m.Code, &m.Label, &m.Description, &m.SnapChannels, &m.ConfirmTypes, &m.FeeFlat, &m.FeeBPS,
-		&m.FeeSource, &m.RefundMode, &m.SortOrder)
+		&m.FeeSource, &m.FeeVersion, &m.RefundMode, &m.SortOrder)
 	return m, err
 }
 

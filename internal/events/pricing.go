@@ -113,6 +113,9 @@ func (s Store) replacePricing(c *gin.Context, account auth.Account) {
 		if value.Status != "draft" && !published {
 			return errPricingClosed
 		}
+		if err := s.withPlan(ctx, tx, id, nil); err != nil {
+			return err
+		}
 		var now time.Time
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err

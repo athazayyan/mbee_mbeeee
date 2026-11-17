@@ -5,38 +5,41 @@ Dokumen ini mencatat keputusan dan cara mengoperasikan pembayaran sandbox. Tarif
 
 ## Metode yang dirilis (E08-01)
 
-| Kode | Metode | Channel Snap | `payment_type` di notifikasi | Biaya admin (estimasi) | Refund |
+| Kode | Metode | Channel Snap | `payment_type` di notifikasi | Biaya admin | Refund |
 | --- | --- | --- | --- | --- | --- |
-| `bank_transfer` | Virtual Account | `bca_va`, `bni_va`, `bri_va`, `permata_va`, `other_va` | `bank_transfer` | Rp4.000 per transaksi | manual |
-| `qris` | QRIS | `other_qris` | `qris` | 0,7% | manual |
-| `gopay` | GoPay | `gopay` | `gopay` | 2% | API |
+| `bca_va` | BCA Virtual Account | `bca_va` | `bank_transfer` | Rp4.000 per transaksi | manual |
+| `other_qris` | QRIS | `other_qris` | `qris` | Rp0 | manual |
 
-- Kartu kredit, minimarket, dan ShopeePay tidak dirilis. Tambahkan lewat baris baru di `payment_methods` setelah
-  channel-nya aktif dan `payments check` lulus.
-- **Tarif masih estimasi** (`fee_source = 'estimate'`), diambil dari daftar harga publik Midtrans. Ganti dengan
-  tarif kontrak merchant lalu set `fee_source = 'contract'`. Ini bagian dari PROD-02.
-- **Yang menanggung biaya adalah tenant** (PROD-03). Biaya dihitung dari bawah ke atas supaya setelah Midtrans memotong
-  biayanya, platform tetap menerima sewa + biaya platform: `bruto = ceil((dasar + flat) × 10000 / (10000 − bps))`.
-  PPN atas biaya Midtrans belum diperhitungkan.
-- **Refund**: kolom `refund_mode` menandai metode yang bisa di-refund lewat API (`api`) dan yang harus dikembalikan
-  manual ke rekening tenant (`manual`). Nilainya perkiraan dan harus dikonfirmasi ke Midtrans sebelum E09 dikerjakan.
+- Hanya dua metode ini yang terbuka (`enabled`). Baris `bank_transfer` (semua bank), `qris` (0,7%), dan `gopay` (2%)
+  tetap ada di `payment_methods` tetapi tertutup. Buka lagi dengan `UPDATE payment_methods SET enabled = true WHERE code = ...`
+  setelah tarifnya dikonfirmasi dan `payments check` lulus. Kartu kredit, minimarket, dan ShopeePay tidak ada.
+- **Tarif masih estimasi** (`fee_source = 'estimate'`) dan versinya tercatat di `fee_version` pada tiap attempt.
+  Ganti dengan tarif kontrak merchant lalu naikkan `fee_version`. Ini bagian dari PROD-02.
+- **Tenant menanggung biaya admin** dan **tidak ada biaya platform pada sewa** (PROD-03): total = sewa + biaya admin.
+  Pendapatan platform datang dari harga paket acara. Biaya platform dan biaya provider tetap pada snapshot booking
+  tidak ditagihkan untuk metode terpilih. Metode lama `snap` tetap diterima dan menagih total snapshot.
+- Biaya persentase dihitung dari bawah ke atas supaya setelah Midtrans memotong biayanya platform tetap menerima sewa:
+  `bruto = ceil((dasar + flat) × 10000 / (10000 − bps))`. PPN atas biaya Midtrans belum diperhitungkan.
+- **Refund**: `refund_mode` menandai metode yang bisa di-refund lewat API (`api`) atau harus dikembalikan manual (`manual`).
+  Nilainya perkiraan dan harus dikonfirmasi ke Midtrans sebelum E09 dikerjakan.
 - **Pencairan ke penyelenggara** tidak bergantung pada metode tenant. Ia lewat disbursement terpisah (E09) dan belum ada.
 
 ## Alur checkout (E08-02, E08-05)
 
-1. `GET /bookings/{id}/payment-options` menampilkan sewa, biaya platform, dan total tiap metode.
-2. `POST /bookings/{id}/payments` dengan `{ "method": "qris" }` membuat attempt. Server menghitung total; klien tidak
-   mengirim nominal. Halaman bayar Midtrans dibatasi ke channel metode itu.
+1. `GET /bookings/{id}/payment-quotes` (atau `payment-options`, yang juga memuat attempt terakhir) menampilkan sewa,
+   biaya admin, dan total tiap metode.
+2. `POST /bookings/{id}/payments` dengan `{ "method": "other_qris", "expected_total": 30000 }` membuat attempt. Server
+   menghitung total dan menjawab `409 PAYMENT_QUOTE_CHANGED` bila `expected_total` tidak cocok. Halaman bayar Midtrans dibatasi ke channel metode itu.
 3. Tenant dialihkan ke `checkout_url`. Setelah selesai Midtrans mengirim browser ke
    `{APP_ORIGIN}/tenant/bookings/{id}?pembayaran=selesai`. Halaman itu menunggu status dari server, bukan dari query.
 4. Mengganti metode saat attempt masih aktif menutup transaksi lama di Midtrans (`expire`) dan membuat attempt baru
    dengan total baru. Bila Midtrans menolak karena transaksi lama sedang dibayar, server menjawab
-   `409 PAYMENT_IN_PROGRESS`.
+   `409 PAYMENT_ALREADY_OPEN`.
 5. Metode yang benar-benar dipakai (`payment_type` dari Midtrans) disimpan di `payment_attempts.confirmed_type`. Bila
    berbeda dari metode yang dipilih, uangnya tetap dicatat dan muncul exception `method_mismatch`.
 
-Biaya provider tetap pada snapshot booking (`bookings.provider_fee`) tidak lagi ditagihkan. Biaya admin metode
-menggantikannya. Karena itu hold policy sebaiknya mengisi `provider_fee` dengan 0.
+Rincian yang ditagihkan tiap attempt tersimpan di `rent_amount`, `platform_fee_amount`, `provider_fee_amount`, dan
+`fee_version`. Attempt lama tanpa rincian memakai snapshot booking.
 
 ## Ledger (E08-04)
 
@@ -46,7 +49,7 @@ Satu pembayaran sewa menghasilkan satu transaksi `payment_received`:
 | --- | --- | --- |
 | `provider_clearing` | debit | total yang dibayar tenant |
 | `organizer_escrow` | kredit | sewa, hak hasil penyelenggara |
-| `platform_revenue` | kredit | biaya platform |
+| `platform_revenue` | kredit | biaya platform (nol untuk metode terpilih; terisi untuk attempt `snap` lama) |
 | `provider_fee_payable` | kredit | biaya admin metode |
 
 Jenis transaksi lain: `plan_payment_received` (harga paket, seluruhnya pendapatan platform), `reversal` (cermin dari
@@ -82,7 +85,7 @@ Perintah membuat token Snap sekali pakai per metode lalu membaca channel yang be
 akun merchant. Perlu `MIDTRANS_CLIENT_KEY`. Midtrans menerima nama channel apa pun saat token dibuat, jadi pembacaan
 ulang itulah yang membuktikan channel aktif. Tidak ada uang yang bergerak dan tidak ada data tersimpan.
 
-Hasil pada akun sandbox proyek ini (17 November 2026): `bank_transfer`, `qris`, dan `gopay` tersedia.
+Hasil pada akun sandbox proyek ini (17 November 2026): `bca_va` dan `other_qris` tersedia. `gopay` dan `bank_transfer` (semua bank) juga tersedia di akun itu.
 
 ## Uji webhook hosted (E08-03, E08-06)
 

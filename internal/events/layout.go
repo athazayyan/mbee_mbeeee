@@ -257,6 +257,21 @@ func (s Store) saveLayout(ctx context.Context, actor, eventID, ifMatch string, i
 		if owned.Status == "completed" || owned.Status == "cancelled" {
 			return errLayoutClosed
 		}
+		if s.RequirePlan {
+			active := 0
+			for _, stand := range input.Stands {
+				if stand.Active {
+					active++
+				}
+			}
+			issue, err := planIssue(ctx, tx, eventID, active)
+			if err != nil {
+				return err
+			}
+			if issue != "" {
+				return fieldErrors{"plan": issue}
+			}
+		}
 		current, err := currentLayoutRevision(ctx, tx, eventID)
 		if err != nil {
 			return err

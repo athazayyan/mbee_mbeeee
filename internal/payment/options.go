@@ -21,15 +21,13 @@ type MethodOption struct {
 
 // Options is the checkout summary for a booking.
 type Options struct {
-	BookingID   string         `json:"booking_id"`
-	Status      string         `json:"status"`
-	ExpiresAt   time.Time      `json:"expires_at"`
-	Rent        int64          `json:"rent"`
-	PlatformFee int64          `json:"platform_fee"`
-	Subtotal    int64          `json:"subtotal"`
-	FeeBearer   string         `json:"fee_bearer"`
-	Payable     bool           `json:"payable"`
-	Methods     []MethodOption `json:"methods"`
+	BookingID string         `json:"booking_id"`
+	Status    string         `json:"status"`
+	ExpiresAt time.Time      `json:"expires_at"`
+	Rent      int64          `json:"rent"`
+	FeeBearer string         `json:"fee_bearer"`
+	Payable   bool           `json:"payable"`
+	Methods   []MethodOption `json:"methods"`
 	// Attempt is the latest payment attempt, so a payer who returns from the provider can see where it stands.
 	Attempt *Attempt `json:"attempt"`
 }
@@ -40,16 +38,15 @@ func (s Store) PaymentOptions(ctx context.Context, actor, bookingID string) (Opt
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var eventStatus string
 		var live bool
-		err := tx.QueryRow(ctx, `SELECT b.status, b.rent, b.platform_fee, b.expires_at, e.status, b.expires_at > clock_timestamp()
+		err := tx.QueryRow(ctx, `SELECT b.status, b.rent, b.expires_at, e.status, b.expires_at > clock_timestamp()
 			FROM bookings b JOIN events e ON e.id = b.event_id
 			WHERE b.id = $1 AND (b.created_by = $2 OR EXISTS (
 				SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.role = 'owner' AND m.business_id = b.business_id))`,
-			bookingID, actor).Scan(&result.Status, &result.Rent, &result.PlatformFee, &result.ExpiresAt, &eventStatus, &live)
+			bookingID, actor).Scan(&result.Status, &result.Rent, &result.ExpiresAt, &eventStatus, &live)
 		if err != nil {
 			return err
 		}
-		result.Subtotal = result.Rent + result.PlatformFee
-		result.Payable = s.Provider != nil && live && result.Subtotal >= 1 &&
+		result.Payable = s.Provider != nil && live && result.Rent >= 1 &&
 			(result.Status == "held" || result.Status == "payment_pending") &&
 			(eventStatus == "published" || eventStatus == "live")
 		methods, err := enabledMethods(ctx, tx)
@@ -57,12 +54,12 @@ func (s Store) PaymentOptions(ctx context.Context, actor, bookingID string) (Opt
 			return err
 		}
 		for _, m := range methods {
-			fee, err := m.Fee(result.Subtotal)
+			fee, err := m.Fee(result.Rent)
 			if err != nil {
 				return err
 			}
 			result.Methods = append(result.Methods, MethodOption{
-				Code: m.Code, Label: m.Label, Description: m.Description, Fee: fee, Total: result.Subtotal + fee,
+				Code: m.Code, Label: m.Label, Description: m.Description, Fee: fee, Total: result.Rent + fee,
 				FeeSource: m.FeeSource, RefundMode: m.RefundMode,
 			})
 		}

@@ -18,6 +18,7 @@ var methodCode = regexp.MustCompile(`^[a-z0-9_]{1,40}$`)
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.POST("/bookings/:id/payments", httpapi.RequireOrigin(origin), sessions.WithAccount(s.createPayment))
+	api.GET("/bookings/:id/payment-quotes", sessions.WithAccount(s.listBookingPaymentQuotes))
 	api.GET("/bookings/:id/payment-options", sessions.WithAccount(s.paymentOptions))
 	api.POST("/webhooks/payments/:provider", s.webhook)
 	s.planRoutes(api, sessions, origin)
@@ -54,8 +55,10 @@ func (s Store) createPayment(c *gin.Context, account auth.Account) {
 	case errors.Is(err, ErrUnknownMethod):
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Metode pembayaran tidak tersedia.",
 			map[string]string{"method": "Pilih salah satu metode yang tersedia."})
+	case errors.Is(err, ErrQuoteChanged):
+		httpapi.Error(c, http.StatusConflict, "PAYMENT_QUOTE_CHANGED", "Muat ulang rincian biaya lalu konfirmasi total pembayaran.", nil)
 	case errors.Is(err, ErrPaymentInProgress):
-		httpapi.Error(c, http.StatusConflict, "PAYMENT_IN_PROGRESS", "Pembayaran sebelumnya masih diproses. Tunggu statusnya berubah sebelum mengganti metode.", nil)
+		httpapi.Error(c, http.StatusConflict, "PAYMENT_ALREADY_OPEN", "Pembayaran sebelumnya masih diproses. Tunggu statusnya berubah sebelum mengganti metode.", nil)
 	case errors.Is(err, ErrNotPayable), errors.Is(err, ErrAmountTooLarge):
 		httpapi.Error(c, http.StatusConflict, "BOOKING_NOT_PAYABLE", "Booking sudah tidak dapat dibayar.", nil)
 	case errors.Is(err, ErrIdempotencyMismatch):

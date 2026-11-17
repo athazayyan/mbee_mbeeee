@@ -86,67 +86,75 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 	s.Provider.SnapURL, s.Provider.StatusURL = server.URL+"/snap", server.URL
 	s.AppOrigin = "https://app.example.com"
 	w := seedWorld(t, ctx, s, "m@example.com")
-	// Rent 30000 + platform fee 1000. The legacy provider_fee of 500 is superseded by the method fee.
+	// Rent 30000. The booking's fixed platform fee (1000) and provider fee (500) are replaced by the method's admin fee.
 	booking := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000a1")
-	pay := func(key, method string) (Attempt, bool, error) {
-		return s.CreateAttempt(ctx, w.user, "m@example.com", booking, key, Input{Method: method})
+	pay := func(key, method string, total int64) (Attempt, bool, error) {
+		return s.CreateAttempt(ctx, w.user, "m@example.com", booking, key, Input{Method: method, ExpectedTotal: &total})
 	}
 
-	// Options list every released method with its exact total before any attempt exists.
+	// Released methods: BCA VA with a flat fee and QRIS with none. Each total is exact before any attempt exists.
 	options, err := s.PaymentOptions(ctx, w.user, booking)
-	if err != nil || !options.Payable || options.Subtotal != 31000 || options.FeeBearer != "tenant" || options.Attempt != nil || len(options.Methods) != 3 {
+	if err != nil || !options.Payable || options.Rent != 30000 || options.FeeBearer != "tenant" || options.Attempt != nil || len(options.Methods) != 2 {
 		t.Fatalf("options %+v %v", options, err)
 	}
 	totals := map[string]int64{}
 	for _, m := range options.Methods {
 		totals[m.Code] = m.Total
 	}
-	if totals["bank_transfer"] != 35000 || totals["qris"] != 31219 || totals["gopay"] != 31633 {
+	if totals["bca_va"] != 34000 || totals["other_qris"] != 30000 {
 		t.Fatalf("method totals %v", totals)
 	}
 	if _, err := s.PaymentOptions(ctx, "00000000-0000-4000-8000-0000000000ff", booking); err == nil {
 		t.Fatal("another account must not read payment options")
 	}
 
-	// Unknown or disabled methods never reach the provider.
-	if _, _, err := pay("k0", "cash"); !errors.Is(err, ErrUnknownMethod) {
+	// Unknown, closed, or stale-total requests never reach the provider.
+	if _, _, err := pay("k0", "cash", 30000); !errors.Is(err, ErrUnknownMethod) {
 		t.Fatalf("unknown method: %v", err)
 	}
-	if _, err := s.DB.Exec(ctx, `UPDATE payment_methods SET enabled = false WHERE code = 'gopay'`); err != nil {
-		t.Fatal(err)
+	if _, _, err := pay("k0b", "gopay", 30000); !errors.Is(err, ErrUnknownMethod) {
+		t.Fatalf("closed method: %v", err)
 	}
-	if _, _, err := pay("k0b", "gopay"); !errors.Is(err, ErrUnknownMethod) {
-		t.Fatalf("disabled method: %v", err)
+	if _, _, err := pay("k0c", "bca_va", 30000); !errors.Is(err, ErrQuoteChanged) {
+		t.Fatalf("stale total: %v", err)
 	}
 	if len(fake.snaps) != 0 {
-		t.Fatal("rejected methods reached the provider")
+		t.Fatal("rejected requests reached the provider")
+	}
+	// A percentage method, closed by default, is priced so the platform still keeps the rent.
+	if _, err := s.DB.Exec(ctx, `UPDATE payment_methods SET enabled = true WHERE code = 'qris'`); err != nil {
+		t.Fatal(err)
 	}
 
-	// First attempt: the transfer fee is added, and the hosted page is limited to that method's channels.
-	first, created, err := pay("k1", "bank_transfer")
-	if err != nil || !created || first.Amount != 35000 || first.MethodFee != 4000 || first.Method != "bank_transfer" {
+	// First attempt: the transfer fee is added, and the hosted page is limited to that method's channel.
+	first, created, err := pay("k1", "bca_va", 34000)
+	if err != nil || !created || first.Amount != 34000 || first.MethodFee != 4000 || first.Method != "bca_va" {
 		t.Fatalf("first attempt %+v %v", first, err)
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE id = $1 AND rent_amount = 30000
+		AND platform_fee_amount = 0 AND provider_fee_amount = 4000 AND fee_version = 'midtrans-sandbox-v1'`, first.ID) != 1 {
+		t.Fatal("attempt did not record its fee breakdown and version")
 	}
 	sent := fake.snaps[0]
 	var sum int64
 	for _, item := range sent.ItemDetails {
 		sum += item.Price * int64(item.Quantity)
 	}
-	if sent.TransactionDetails.GrossAmount != 35000 || sum != 35000 || len(sent.ItemDetails) != 3 ||
-		strings.Join(sent.EnabledPayments, ",") != "bca_va,bni_va,bri_va,permata_va,other_va" ||
+	if sent.TransactionDetails.GrossAmount != 34000 || sum != 34000 || len(sent.ItemDetails) != 2 ||
+		strings.Join(sent.EnabledPayments, ",") != "bca_va" ||
 		sent.Callbacks == nil || sent.Callbacks.Finish != "https://app.example.com/tenant/bookings/"+booking+"?pembayaran=selesai" {
 		t.Fatalf("snap request %+v", sent)
 	}
 
-	// Same method again reuses the live attempt and does not touch the provider.
-	same, created, err := pay("k1b", "bank_transfer")
+	// Same method and total again reuses the live attempt and does not touch the provider.
+	same, created, err := pay("k1b", "bca_va", 34000)
 	if err != nil || created || same.ID != first.ID || len(fake.snaps) != 1 || len(fake.expired) != 0 {
 		t.Fatalf("same method %+v %v", same, err)
 	}
 
 	// The provider refuses to close it (already being paid): no second attempt, nothing changes.
 	fake.expire = `{"status_code":"412","status_message":"Transaction status cannot be updated."}`
-	if _, _, err := pay("k2", "qris"); !errors.Is(err, ErrPaymentInProgress) {
+	if _, _, err := pay("k2", "qris", 30212); !errors.Is(err, ErrPaymentInProgress) {
 		t.Fatalf("expected in-progress refusal, got %v", err)
 	}
 	if got := one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, first.ID); got != "pending" || len(fake.snaps) != 1 {
@@ -154,9 +162,8 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 	}
 
 	// Refused only because the provider already closed it: that is safe to replace, so the status lookup decides.
-	fake.status[first.ID] = `{"order_id":"` + first.ID + `","status_code":"407","transaction_status":"expire","gross_amount":"35000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t0"}`
-	fake.expire = `{"status_code":"412","status_message":"Transaction status cannot be updated."}`
-	closed, created, err := pay("k2b", "qris")
+	fake.status[first.ID] = `{"order_id":"` + first.ID + `","status_code":"407","transaction_status":"expire","gross_amount":"34000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t0"}`
+	closed, created, err := pay("k2b", "qris", 30212)
 	if err != nil || !created || closed.Method != "qris" {
 		t.Fatalf("switch over an already-closed attempt %+v %v", closed, err)
 	}
@@ -169,10 +176,10 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 	}
 	delete(fake.status, first.ID)
 
-	// Switching closes the old attempt and prices the new method from scratch.
+	// Switching closes the old attempt and prices the new method from scratch (QRIS 0.7%, grossed up).
 	fake.expire = `{"status_code":"404","status_message":"Transaction doesn't exist."}`
-	second, created, err := pay("k3", "qris")
-	if err != nil || !created || second.ID == first.ID || second.Amount != 31219 || second.MethodFee != 219 || second.Method != "qris" {
+	second, created, err := pay("k3", "qris", 30212)
+	if err != nil || !created || second.ID == first.ID || second.Amount != 30212 || second.MethodFee != 212 || second.Method != "qris" {
 		t.Fatalf("switched attempt %+v %v", second, err)
 	}
 	if got := one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, first.ID); got != "expired" {
@@ -186,7 +193,7 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 	}
 
 	// A late expire notice for the replaced attempt must not put the booking back to held.
-	n, raw := notify(first.ID, "expire", "407", "35000.00")
+	n, raw := notify(first.ID, "expire", "407", "34000.00")
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +208,7 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 	}
 
 	// Paying with a different method than priced is flagged but the money is still booked.
-	n, raw = notify(second.ID, "settlement", "200", "31219.00")
+	n, raw = notify(second.ID, "settlement", "200", "30212.00")
 	n.PaymentType = "gopay"
 	raw, _ = json.Marshal(n)
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
@@ -217,8 +224,8 @@ func TestMethodSwitchFeesAndLedger(t *testing.T) {
 		t.Fatal("expected method_mismatch exception")
 	}
 	balances, err := s.Balances(ctx)
-	if err != nil || balances[accountClearing] != 31219 || balances[accountEscrow] != -30000 ||
-		balances[accountRevenue] != -1000 || balances[accountProviderFee] != -219 {
+	if err != nil || balances[accountClearing] != 30212 || balances[accountEscrow] != -30000 ||
+		balances[accountRevenue] != 0 || balances[accountProviderFee] != -212 {
 		t.Fatalf("balances %v %v", balances, err)
 	}
 
@@ -254,7 +261,8 @@ func TestReconcileAndLedgerKinds(t *testing.T) {
 	s.Provider.SnapURL, s.Provider.StatusURL = server.URL+"/snap", server.URL
 	w := seedWorld(t, ctx, s, "r@example.com")
 	missed := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000b1")
-	attempt, _, err := s.CreateAttempt(ctx, w.user, "r@example.com", missed, "r1", Input{Method: "bank_transfer"})
+	total := int64(34000)
+	attempt, _, err := s.CreateAttempt(ctx, w.user, "r@example.com", missed, "r1", Input{Method: "bca_va", ExpectedTotal: &total})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +275,7 @@ func TestReconcileAndLedgerKinds(t *testing.T) {
 	if _, err := s.DB.Exec(ctx, `UPDATE payment_attempts SET updated_at = now() - interval '10 minutes'`); err != nil {
 		t.Fatal(err)
 	}
-	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"200","transaction_status":"settlement","gross_amount":"35000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"tx-1"}`
+	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"200","transaction_status":"settlement","gross_amount":"34000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"tx-1"}`
 	report, err = s.Reconcile(ctx, time.Minute, 50)
 	if err != nil || report.Checked != 1 || report.Synced != 1 || !report.Balanced || report.LedgerMissing != 0 {
 		t.Fatalf("sync pass %+v %v", report, err)
@@ -283,7 +291,8 @@ func TestReconcileAndLedgerKinds(t *testing.T) {
 
 	// An attempt never opened at the provider is closed only well after its expiry.
 	idle := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000b2")
-	unopened, _, err := s.CreateAttempt(ctx, w.user, "r@example.com", idle, "r2", Input{Method: "qris"})
+	total = 30000
+	unopened, _, err := s.CreateAttempt(ctx, w.user, "r@example.com", idle, "r2", Input{Method: "other_qris", ExpectedTotal: &total})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +350,7 @@ func TestReconcileAndLedgerKinds(t *testing.T) {
 		t.Fatal("refund and payout were not posted as separate kinds")
 	}
 	balances, err := s.Balances(ctx)
-	if err != nil || balances[accountEscrow] != -30000+30000 || balances[accountClearing] != 35000-30000 {
+	if err != nil || balances[accountEscrow] != -30000+30000 || balances[accountClearing] != 34000-30000 {
 		t.Fatalf("balances after refund and payout %v %v", balances, err)
 	}
 }
@@ -359,7 +368,8 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 	s.Provider.SnapURL, s.Provider.StatusURL = server.URL+"/snap", server.URL
 	w := seedWorld(t, ctx, s, "w@example.com")
 	booking := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000d1")
-	attempt, _, err := s.CreateAttempt(ctx, w.user, "w@example.com", booking, "w1", Input{Method: "bank_transfer"})
+	total := int64(34000)
+	attempt, _, err := s.CreateAttempt(ctx, w.user, "w@example.com", booking, "w1", Input{Method: "bca_va", ExpectedTotal: &total})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +384,7 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 	}
 	status := func() string { return one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, booking) }
 
-	signed, _ := notify(attempt.ID, "settlement", "200", "35000.00")
+	signed, _ := notify(attempt.ID, "settlement", "200", "34000.00")
 	forged := signed
 	forged.SignatureKey = "00"
 	if code := post("midtrans", forged); code != http.StatusUnauthorized || status() != "payment_pending" {
@@ -384,7 +394,7 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 		t.Fatalf("unknown provider: %d", code)
 	}
 	// Signed settlement but the provider says it is still pending: the provider wins.
-	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"201","transaction_status":"pending","gross_amount":"35000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t1"}`
+	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"201","transaction_status":"pending","gross_amount":"34000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t1"}`
 	if code := post("midtrans", signed); code != http.StatusNoContent || status() != "payment_pending" {
 		t.Fatalf("contradicting status: %d %s", code, status())
 	}
@@ -394,7 +404,7 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 		t.Fatalf("provider unavailable: %d %s", code, status())
 	}
 	// Settled at the provider with the right amount confirms, once, however many times it is delivered.
-	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"200","transaction_status":"settlement","gross_amount":"35000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t2"}`
+	fake.status[attempt.ID] = `{"order_id":"` + attempt.ID + `","status_code":"200","transaction_status":"settlement","gross_amount":"34000.00","currency":"IDR","payment_type":"bank_transfer","transaction_id":"t2"}`
 	for range 3 {
 		if code := post("midtrans", signed); code != http.StatusNoContent {
 			t.Fatalf("settlement: %d", code)
@@ -405,7 +415,7 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 	}
 	// A wrong amount at the provider is an exception, not a payment.
 	other := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000d2")
-	wrong, _, err := s.CreateAttempt(ctx, w.user, "w@example.com", other, "w2", Input{Method: "bank_transfer"})
+	wrong, _, err := s.CreateAttempt(ctx, w.user, "w@example.com", other, "w2", Input{Method: "bca_va", ExpectedTotal: &total})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,11 +428,12 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 	}
 }
 
-// Databases that already hold attempts must upgrade cleanly: the old total splits into base and fee.
-func TestPaymentMethodsMigrationBackfill(t *testing.T) {
+// Databases that already hold attempts must upgrade cleanly through every payment migration: the old
+// booking total becomes a breakdown on the attempt, and the interim columns are retired.
+func TestPaymentFeeMigrationsBackfill(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s := storeWithMigrations(t, ctx, func(name string) bool { return !strings.HasPrefix(name, "00020_") })
+	s := storeWithMigrations(t, ctx, func(name string) bool { return name < "00020_" })
 	w := seedWorld(t, ctx, s, "u@example.com")
 	booking := seedBooking(t, ctx, s, w.user, w.business, w.category, w.event, w.slot, "00000000-0000-4000-8000-0000000000e1")
 	// seedBooking holds rent 30000, platform fee 1000, provider fee 500, so the old attempt charged 31500.
@@ -435,18 +446,34 @@ func TestPaymentMethodsMigrationBackfill(t *testing.T) {
 		VALUES ($1, $2, 'midtrans', 'snap', 'paid', 50000, now() + interval '10 minutes', 'oldplan', decode(repeat('00', 32), 'hex'))`, purchase, w.user); err != nil {
 		t.Fatal(err)
 	}
-	sql, err := os.ReadFile("../../migrations/00020_payment_methods.up.sql")
+	files, err := os.ReadDir("../../migrations")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.DB.Exec(ctx, string(sql)); err != nil {
-		t.Fatal(err)
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".up.sql") || f.Name() < "00020_" {
+			continue
+		}
+		// Only the payment migrations matter here; plan, layout, and booking-hold migrations also run in order.
+		sql, err := os.ReadFile("../../migrations/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.DB.Exec(ctx, string(sql)); err != nil {
+			t.Fatalf("%s: %v", f.Name(), err)
+		}
 	}
-	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE booking_id IS NOT NULL AND base_amount = 31000 AND method_fee = 500 AND amount = 31500`) != 1 ||
-		count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE purchase_id IS NOT NULL AND base_amount = 50000 AND method_fee = 0`) != 1 {
-		t.Fatal("existing attempts were not split into base amount and method fee")
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE booking_id IS NOT NULL AND rent_amount = 30000
+		AND platform_fee_amount = 1000 AND provider_fee_amount = 500 AND amount = 31500`) != 1 ||
+		count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE purchase_id IS NOT NULL AND rent_amount IS NULL AND amount = 50000`) != 1 {
+		t.Fatal("existing attempts were not given a breakdown")
 	}
-	if _, err := s.DB.Exec(ctx, `UPDATE payment_attempts SET method_fee = 1 WHERE purchase_id IS NOT NULL`); err == nil {
-		t.Fatal("base amount and fee must always add up to the amount")
+	if count(t, ctx, s, `SELECT count(*) FROM information_schema.columns WHERE table_name = 'payment_attempts'
+		AND table_schema = current_schema() AND column_name IN ('base_amount', 'method_fee')`) != 0 {
+		t.Fatal("interim fee columns were not retired")
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM payment_methods WHERE enabled AND code IN ('bca_va', 'other_qris')`) != 2 ||
+		count(t, ctx, s, `SELECT count(*) FROM payment_methods WHERE enabled`) != 2 {
+		t.Fatal("only BCA VA and QRIS should be open after upgrade")
 	}
 }

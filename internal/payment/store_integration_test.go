@@ -169,24 +169,28 @@ func TestPaymentLifecycle(t *testing.T) {
 	booking := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000001")
 
 	// Another account cannot pay for this booking.
-	if _, _, err := s.CreateAttempt(ctx, other, "q@example.com", booking, "k0", Input{Method: "bank_transfer"}); !errors.Is(err, pgx.ErrNoRows) {
+	if _, _, err := s.CreateAttempt(ctx, other, "q@example.com", booking, "k0", Input{Method: "snap"}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-account payment: %v", err)
 	}
-	attempt, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer"})
-	if err != nil || !created || attempt.Amount != 35000 || attempt.Status != "pending" || attempt.CheckoutURL == "" {
+	attempt, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap"})
+	if err != nil || !created || attempt.Amount != 31500 || attempt.Status != "pending" || attempt.CheckoutURL == "" {
 		t.Fatalf("attempt %+v created=%v err=%v", attempt, created, err)
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE id = $1
+		AND rent_amount = 30000 AND platform_fee_amount = 1000 AND provider_fee_amount = 500`, attempt.ID) != 1 {
+		t.Fatal("payment attempt must preserve the booking amount breakdown")
 	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, booking); got != "payment_pending" {
 		t.Fatalf("booking status %s", got)
 	}
-	replay, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer"})
+	replay, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap"})
 	if err != nil || created || replay.ID != attempt.ID {
 		t.Fatalf("replay %+v created=%v err=%v", replay, created, err)
 	}
-	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer", Description: "x"}); !errors.Is(err, ErrIdempotencyMismatch) {
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap", Description: "x"}); !errors.Is(err, ErrIdempotencyMismatch) {
 		t.Fatalf("mismatch: %v", err)
 	}
-	again, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k2", Input{Method: "bank_transfer"})
+	again, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k2", Input{Method: "snap"})
 	if err != nil || created || again.ID != attempt.ID {
 		t.Fatalf("second key should reuse the live attempt: %+v %v", again, err)
 	}
@@ -204,13 +208,13 @@ func TestPaymentLifecycle(t *testing.T) {
 	}
 
 	// Settlement confirms once, even if delivered repeatedly or followed by a stale pending event.
-	n, raw = notify(attempt.ID, "settlement", "200", "35000.00")
+	n, raw = notify(attempt.ID, "settlement", "200", "31500.00")
 	for range 3 {
 		if err := s.ApplyNotification(ctx, n, raw); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stale, staleRaw := notify(attempt.ID, "pending", "201", "35000.00")
+	stale, staleRaw := notify(attempt.ID, "pending", "201", "31500.00")
 	if err := s.ApplyNotification(ctx, stale, staleRaw); err != nil {
 		t.Fatal(err)
 	}
@@ -237,14 +241,14 @@ func TestPaymentLifecycle(t *testing.T) {
 
 	// Payment arriving after the hold expired is an exception, never a silent confirmation.
 	expired := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000002")
-	late, _, err := s.CreateAttempt(ctx, user, "p@example.com", expired, "k3", Input{Method: "bank_transfer"})
+	late, _, err := s.CreateAttempt(ctx, user, "p@example.com", expired, "k3", Input{Method: "snap"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(ctx, `UPDATE bookings SET expires_at = now() - interval '1 minute' WHERE id = $1`, expired); err != nil {
 		t.Fatal(err)
 	}
-	n, raw = notify(late.ID, "settlement", "200", "35000.00")
+	n, raw = notify(late.ID, "settlement", "200", "31500.00")
 	expiryWorker := bookingstore.Store{DB: s.DB}
 	expiry := make(chan error, 1)
 	go func() {
@@ -268,18 +272,18 @@ func TestPaymentLifecycle(t *testing.T) {
 
 	// A failed attempt returns the booking to held so the tenant can retry.
 	retry := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000003")
-	failing, _, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k4", Input{Method: "bank_transfer"})
+	failing, _, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k4", Input{Method: "snap"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, raw = notify(failing.ID, "expire", "407", "35000.00")
+	n, raw = notify(failing.ID, "expire", "407", "31500.00")
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
 		t.Fatal(err)
 	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, retry); got != "held" {
 		t.Fatalf("booking after failed attempt: %s", got)
 	}
-	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "bank_transfer"})
+	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "snap"})
 	if err != nil || !created || next.ID == failing.ID {
 		t.Fatalf("retry attempt %+v %v", next, err)
 	}
@@ -300,11 +304,11 @@ func TestPaymentLifecycle(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusCreated,
 			Body: io.NopCloser(strings.NewReader(`{"token":"recovered","redirect_url":"https://pay.example/recovered"}`))}, nil
 	})}
-	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "bank_transfer"}); !errors.Is(err, ErrProvider) {
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"}); !errors.Is(err, ErrProvider) {
 		t.Fatalf("expected provider timeout, got %v", err)
 	}
 	reserved := one(t, ctx, s, `SELECT id FROM payment_attempts WHERE booking_id = $1 AND status = 'created'`, timeout)
-	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "bank_transfer"})
+	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"})
 	if err != nil || created || recovered.ID != reserved || recovered.Status != "pending" || recovered.CheckoutURL == "" {
 		t.Fatalf("timeout recovery %+v created=%v err=%v", recovered, created, err)
 	}
@@ -320,6 +324,75 @@ func TestPaymentLifecycle(t *testing.T) {
 	}
 	if count(t, ctx, s, `SELECT count(*) FROM payment_exceptions WHERE kind = 'unknown_order'`) != 1 {
 		t.Fatal("expected unknown_order exception")
+	}
+
+	selected := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000005")
+	var snap snapRequest
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		defer req.Body.Close()
+		if err := json.NewDecoder(req.Body).Decode(&snap); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusCreated,
+			Body: io.NopCloser(strings.NewReader(`{"token":"channel","redirect_url":"https://pay.example/channel"}`))}, nil
+	})}
+	total := int64(31500)
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k7", Input{Method: "bca_va", ExpectedTotal: &total}); !errors.Is(err, ErrQuoteChanged) {
+		t.Fatalf("stale total should be rejected: %v", err)
+	}
+	total = 34000
+	chosen, created, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k7", Input{Method: "bca_va", ExpectedTotal: &total})
+	if err != nil || !created || chosen.Amount != total || snap.TransactionDetails.GrossAmount != total ||
+		len(snap.EnabledPayments) != 1 || snap.EnabledPayments[0] != "bca_va" ||
+		len(snap.ItemDetails) != 2 || snap.ItemDetails[0].Price != 30000 || snap.ItemDetails[1].Price != 4000 {
+		t.Fatalf("confirmed channel and price: %+v %+v %v", chosen, snap, err)
+	}
+	// Another method while an attempt is live replaces it, but only when the provider confirms the old
+	// transaction is closed. Here the old one is still being paid, so nothing changes.
+	total = 30000
+	expireBody := `{"status_code":"412","status_message":"Transaction status cannot be updated."}`
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Body != nil {
+			defer req.Body.Close()
+		}
+		body := `{"token":"channel","redirect_url":"https://pay.example/channel"}`
+		status := http.StatusCreated
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/expire"):
+			body, status = expireBody, http.StatusOK
+		case strings.HasSuffix(req.URL.Path, "/status"):
+			body, status = `{"status_code":"201","transaction_status":"pending"}`, http.StatusOK
+		default:
+			if err := json.NewDecoder(req.Body).Decode(&snap); err != nil {
+				return nil, err
+			}
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k8", Input{Method: "other_qris", ExpectedTotal: &total}); !errors.Is(err, ErrPaymentInProgress) {
+		t.Fatalf("switching while the old payment cannot be closed: %v", err)
+	}
+	if got := one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, chosen.ID); got != "pending" {
+		t.Fatalf("refused switch changed the live attempt to %s", got)
+	}
+	expireBody = `{"status_code":"404","status_message":"Transaction doesn't exist."}`
+	switched, created, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k8", Input{Method: "other_qris", ExpectedTotal: &total})
+	if err != nil || !created || switched.Amount != 30000 || switched.Method != "other_qris" ||
+		len(snap.EnabledPayments) != 1 || snap.EnabledPayments[0] != "other_qris" ||
+		one(t, ctx, s, `SELECT status FROM payment_attempts WHERE id = $1`, chosen.ID) != "expired" {
+		t.Fatalf("switched attempt %+v %+v %v", switched, snap, err)
+	}
+	chosen, total = switched, 30000
+	n, raw = notify(chosen.ID, "settlement", "200", "30000.00")
+	if err := s.ApplyNotification(ctx, n, raw); err != nil {
+		t.Fatal(err)
+	}
+	// QRIS carries no admin fee, so the whole payment is rent and no provider fee is booked.
+	if count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE t.ref_id = $1 AND e.account = 'organizer_escrow' AND e.amount = 30000`, chosen.ID) != 1 ||
+		count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE t.ref_id = $1 AND e.account = 'provider_fee_payable'`, chosen.ID) != 0 {
+		t.Fatal("settlement must use the selected quote and preserve rent")
 	}
 }
 
@@ -350,7 +423,23 @@ func TestEventPlanPurchase(t *testing.T) {
 			'Asia/Jakarta', 'Banda Aceh', 'St', 'T') RETURNING id`, org, owner, slug)
 	}
 
+	custom := newEvent("custom")
+	capacity := 120
+	customInput := PlanInput{PlanCode: "custom", Method: "snap", CapacityStands: &capacity}
+	customCheckout, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", custom, "custom-1", customInput)
+	if err != nil || customCheckout.Purchase.CapacityStands == nil || *customCheckout.Purchase.CapacityStands != capacity ||
+		customCheckout.Purchase.Amount != 700000 || customCheckout.Payment == nil || customCheckout.Payment.Amount != 700000 {
+		t.Fatalf("custom price or capacity: %+v, %v", customCheckout, err)
+	}
+	capacity++
+	if _, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", custom, "custom-1", customInput); !errors.Is(err, ErrIdempotencyMismatch) {
+		t.Fatalf("custom capacity must be part of the idempotency key: %v", err)
+	}
+
 	// A free plan activates at once and creates no payment.
+	if _, err := s.DB.Exec(ctx, `UPDATE event_plans SET active = true WHERE code = 'standard'`); err != nil {
+		t.Fatal(err)
+	}
 	free := newEvent("free")
 	got, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", free, "free-1", PlanInput{PlanCode: "standard"})
 	if err != nil || !created || got.Purchase.Status != "active" || got.Payment != nil {
@@ -360,7 +449,7 @@ func TestEventPlanPurchase(t *testing.T) {
 	if err != nil || created || again.Purchase.ID != got.Purchase.ID {
 		t.Fatalf("second purchase should report the active plan: %+v created=%v err=%v", again, created, err)
 	}
-	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts`) != 0 {
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE purchase_id = $1`, got.Purchase.ID) != 0 {
 		t.Fatal("free plan must not open a payment")
 	}
 	if state, err := s.PlanStatus(ctx, member, free); err != nil || !state.Active {

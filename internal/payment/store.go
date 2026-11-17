@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +20,12 @@ var (
 	ErrUnavailable         = errors.New("payments are not configured")
 	// ErrPaymentInProgress means the previous attempt could not be closed, so a new one would risk a double charge.
 	ErrPaymentInProgress = errors.New("a payment for this booking is already in progress")
+	// ErrQuoteChanged means the total the payer confirmed no longer matches what the server computes.
+	ErrQuoteChanged = errors.New("payment total requires confirmation")
 )
+
+// legacyMethod keeps the original single-button Snap flow, which charges the booking snapshot total.
+const legacyMethod = "snap"
 
 type Store struct {
 	DB       *pgxpool.Pool
@@ -45,15 +51,18 @@ type Attempt struct {
 type Input struct {
 	Method      string `json:"method"`
 	Description string `json:"description"`
+	// ExpectedTotal is the total the payer saw in payment-quotes. It is required for every method but snap.
+	ExpectedTotal *int64 `json:"expected_total,omitempty"`
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM payment_attempts, payment_events, payment_exceptions,
-		ledger_transactions, ledger_entries, event_plans, event_plan_purchases, payment_methods LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount, payment_attempts.fee_version, payment_attempts.confirmed_type
+		FROM payment_attempts, payment_events, payment_exceptions, ledger_transactions, ledger_entries,
+		event_plans, event_plan_purchases, payment_methods LIMIT 0`)
 	return err
 }
 
-const attemptColumns = `id, status, amount, currency, provider, COALESCE(checkout_url, ''), expires_at, method, method_fee`
+const attemptColumns = `id, status, amount, currency, provider, COALESCE(checkout_url, ''), expires_at, method, COALESCE(provider_fee_amount, 0)`
 
 func scanAttempt(row pgx.Row) (Attempt, error) {
 	var a Attempt
@@ -68,7 +77,14 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 	if s.Provider == nil {
 		return Attempt{}, false, ErrUnavailable
 	}
-	digest := sha256.Sum256([]byte(bookingID + "\x00" + input.Method + "\x00" + input.Description))
+	request := bookingID + "\x00" + input.Method + "\x00" + input.Description
+	if input.Method != legacyMethod {
+		if input.ExpectedTotal == nil {
+			return Attempt{}, false, ErrQuoteChanged
+		}
+		request += "\x00" + strconv.FormatInt(*input.ExpectedTotal, 10)
+	}
+	digest := sha256.Sum256([]byte(request))
 	var result Attempt
 	var created bool
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) error {
@@ -94,35 +110,44 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		}
 
 		var status string
-		var rent, platformFee int64
+		var total, rent, platformFee, providerFee int64
 		var expires, now time.Time
-		err = tx.QueryRow(ctx, `SELECT b.status, b.rent, b.platform_fee, b.expires_at
+		err = tx.QueryRow(ctx, `SELECT b.status, b.total, b.expires_at, b.rent, b.platform_fee, b.provider_fee
 			FROM bookings b JOIN events e ON e.id = b.event_id
 			WHERE b.id = $1 AND e.status IN ('published', 'live') AND (b.created_by = $2 OR EXISTS (
 				SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.role = 'owner' AND m.business_id = b.business_id))
-			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &rent, &platformFee, &expires)
+			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &total, &expires, &rent, &platformFee, &providerFee)
 		if err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 			return err
 		}
-		base := rent + platformFee
-		if (status != "held" && status != "payment_pending") || !expires.After(now) || base < 1 {
+		if (status != "held" && status != "payment_pending") || !expires.After(now) || total < 1 {
 			return ErrNotPayable
 		}
-		method, err := enabledMethod(ctx, tx, input.Method)
-		if err != nil {
-			return err
-		}
-		fee, err := method.Fee(base)
-		if err != nil {
-			return err
+		// A chosen method replaces the booking's fixed platform and provider fees with its own admin fee.
+		// The legacy snap flow still charges the snapshot total.
+		var feeVersion *string
+		if input.Method != legacyMethod {
+			method, err := enabledMethod(ctx, tx, input.Method)
+			if err != nil {
+				return err
+			}
+			fee, err := method.Fee(rent)
+			if err != nil {
+				return err
+			}
+			total, platformFee, providerFee = rent+fee, 0, fee
+			if total < 1 || total > 9007199254740991 || total != *input.ExpectedTotal {
+				return ErrQuoteChanged
+			}
+			feeVersion = &method.FeeVersion
 		}
 		live, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts
 			WHERE booking_id = $1 AND status IN ('created', 'pending') FOR UPDATE`, bookingID))
 		switch {
-		case err == nil && live.Method == method.Code:
+		case err == nil && live.Method == input.Method && live.Amount == total:
 			result = live
 			return nil
 		case err == nil:
@@ -147,9 +172,10 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		}
 
 		result, err = scanAttempt(tx.QueryRow(ctx, `INSERT INTO payment_attempts
-			(booking_id, created_by, provider, method, status, amount, base_amount, method_fee, expires_at, idempotency_key, request_digest)
-			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9) RETURNING `+attemptColumns,
-			bookingID, actor, method.Code, base+fee, base, fee, expires, key, digest[:]))
+			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
+			rent_amount, platform_fee_amount, provider_fee_amount, fee_version)
+			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING `+attemptColumns,
+			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee, feeVersion))
 		if err != nil {
 			return err
 		}
@@ -196,17 +222,14 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 			result = attempt
 			return nil
 		}
-		method, err := scanMethod(tx.QueryRow(ctx, `SELECT `+methodColumns+` FROM payment_methods WHERE code = $1`, attempt.Method))
-		if err != nil {
-			return err
-		}
 		var eventName string
-		var rent, platformFee int64
+		var rent, platformFee, providerFee int64
 		var remainingSeconds float64
-		err = tx.QueryRow(ctx, `SELECT e.name, b.rent, b.platform_fee, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8
-			FROM bookings b JOIN events e ON e.id = b.event_id
-			WHERE b.id = $1 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID).
-			Scan(&eventName, &rent, &platformFee, &remainingSeconds)
+		err = tx.QueryRow(ctx, `SELECT e.name, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8,
+			COALESCE(p.rent_amount, b.rent), COALESCE(p.platform_fee_amount, b.platform_fee), COALESCE(p.provider_fee_amount, b.provider_fee)
+			FROM bookings b JOIN events e ON e.id = b.event_id JOIN payment_attempts p ON p.booking_id = b.id
+			WHERE b.id = $1 AND p.id = $2 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID, id).
+			Scan(&eventName, &remainingSeconds, &rent, &platformFee, &providerFee)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPayable
 		}
@@ -216,25 +239,33 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 		if remainingSeconds <= 0 {
 			return ErrNotPayable
 		}
-		if rent+platformFee+attempt.MethodFee != attempt.Amount {
+		if rent+platformFee+providerFee != attempt.Amount {
 			return errors.New("payment attempt amount does not match its price split")
 		}
-		var items []snapItem
-		for _, item := range []snapItem{
-			{ID: "rent", Name: truncate("Sewa stand "+eventName, 50), Price: rent, Quantity: 1},
-			{ID: "platform_fee", Name: "Biaya layanan platform", Price: platformFee, Quantity: 1},
-			{ID: "method_fee", Name: truncate("Biaya admin "+method.Label, 50), Price: attempt.MethodFee, Quantity: 1},
-		} {
-			if item.Price > 0 {
-				items = append(items, item)
+		in := SnapInput{
+			OrderID: id, Amount: attempt.Amount, Email: email,
+			Expiry:    time.Duration(remainingSeconds * float64(time.Second)),
+			FinishURL: s.finishURL("/tenant/bookings/" + bookingID + "?pembayaran=selesai"),
+		}
+		if attempt.Method == legacyMethod {
+			in.Items = []snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: truncate("Sewa stand "+eventName, 50)}}
+		} else {
+			method, err := scanMethod(tx.QueryRow(ctx, `SELECT `+methodColumns+` FROM payment_methods WHERE code = $1`, attempt.Method))
+			if err != nil {
+				return err
+			}
+			in.Channels = method.SnapChannels
+			for _, item := range []snapItem{
+				{ID: "rent", Name: truncate("Sewa stand "+eventName, 50), Price: rent, Quantity: 1},
+				{ID: "platform_fee", Name: "Biaya layanan platform", Price: platformFee, Quantity: 1},
+				{ID: "payment-admin", Name: truncate("Biaya admin "+method.Label, 50), Price: providerFee, Quantity: 1},
+			} {
+				if item.Price > 0 {
+					in.Items = append(in.Items, item)
+				}
 			}
 		}
-		snap, err := s.Provider.CreateSnap(ctx, SnapInput{
-			OrderID: id, Amount: attempt.Amount, Email: email, Items: items,
-			Expiry:    time.Duration(remainingSeconds * float64(time.Second)),
-			Channels:  method.SnapChannels,
-			FinishURL: s.finishURL("/tenant/bookings/" + bookingID + "?pembayaran=selesai"),
-		})
+		snap, err := s.Provider.CreateSnap(ctx, in)
 		if err != nil {
 			return err
 		}
@@ -300,12 +331,12 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 
 	var attemptID, status, methodCode string
 	var bookingRef, purchaseRef *string
-	var amount, methodFee int64
+	var amount int64
 	err := pgx.ErrNoRows
 	if httpapi.ValidID(n.OrderID) {
-		err = tx.QueryRow(ctx, `SELECT id, booking_id, purchase_id, status, amount, method, method_fee
+		err = tx.QueryRow(ctx, `SELECT id, booking_id, purchase_id, status, amount, method
 			FROM payment_attempts WHERE id = $1 FOR UPDATE`,
-			n.OrderID).Scan(&attemptID, &bookingRef, &purchaseRef, &status, &amount, &methodCode, &methodFee)
+			n.OrderID).Scan(&attemptID, &bookingRef, &purchaseRef, &status, &amount, &methodCode)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "ignored", exception("unknown_order", nil, nil, map[string]any{})
@@ -373,10 +404,13 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 		return "", err
 	}
 	var bookingStatus string
-	var rent, platformFee int64
+	var rent, platformFee, providerFee int64
 	var expires, now time.Time
-	if err := tx.QueryRow(ctx, `SELECT status, rent, platform_fee, expires_at
-		FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).Scan(&bookingStatus, &rent, &platformFee, &expires); err != nil {
+	// The attempt's own breakdown is what was charged; the booking snapshot only covers older attempts.
+	if err := tx.QueryRow(ctx, `SELECT b.status, COALESCE(p.rent_amount, b.rent),
+		COALESCE(p.platform_fee_amount, b.platform_fee), COALESCE(p.provider_fee_amount, b.provider_fee), b.expires_at
+		FROM bookings b JOIN payment_attempts p ON p.booking_id = b.id AND p.id = $2
+		WHERE b.id = $1 FOR UPDATE OF b`, bookingID, attemptID).Scan(&bookingStatus, &rent, &platformFee, &providerFee, &expires); err != nil {
 		return "", err
 	}
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
@@ -417,11 +451,11 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 		WHERE booking_id = $1 AND id <> $2 AND status IN ('created', 'pending')`, bookingID, attemptID); err != nil {
 		return "", err
 	}
-	if rent+platformFee+methodFee != amount {
+	if rent+platformFee+providerFee != amount {
 		return "applied", exception("ledger_mismatch", &attemptID, &bookingID,
-			map[string]any{"amount": amount, "rent": rent, "platform_fee": platformFee, "method_fee": methodFee})
+			map[string]any{"amount": amount, "rent": rent, "platform_fee": platformFee, "provider_fee": providerFee})
 	}
-	return "applied", recordPayment(ctx, tx, attemptID, rent, platformFee, methodFee)
+	return "applied", recordPayment(ctx, tx, attemptID, rent, platformFee, providerFee)
 }
 
 type exceptionFn func(kind string, attempt, booking *string, detail map[string]any) error

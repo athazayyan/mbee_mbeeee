@@ -1347,7 +1347,8 @@ paths:
       description: Pemilik organisasi acara. Menyimpan denah sebagai revisi baru setelah memvalidasi batas grid,
         tumpang tindih, kode unik, dan kategori. Stand dengan hold, offer, atau reservasi aktif tidak boleh dihapus,
         dipindah, diubah ukuran, kode, atau bloknya, maupun dinonaktifkan (STAND_HAS_BOOKING). Acara selesai atau dibatalkan ditolak
-        (EVENT_CLOSED). Harga stand diatur lewat PUT /events/{id}/pricing.
+        (EVENT_CLOSED). Saat EVENT_PLAN_REQUIRED aktif, paket harus aktif dan jumlah stand aktif harus sesuai kapasitas.
+        Pelanggaran paket mengembalikan kesalahan pada field plan. Harga stand diatur lewat PUT /events/{id}/pricing.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1437,7 +1438,7 @@ paths:
       tags: [Denah dan harga]
       operationId: replacePricing
       summary: Tetapkan versi aturan harga acara
-      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
+      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Saat EVENT_PLAN_REQUIRED aktif, paket aktif dan kapasitas denah yang sesuai wajib sebelum menyimpan harga. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -2210,12 +2211,40 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/payment-quotes:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: listBookingPaymentQuotes
+      summary: Lihat biaya pembayaran booking per metode
+      description: Menggunakan harga sewa pada snapshot booking. Admin QRIS untuk pembayar adalah nol.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Pilihan pembayaran sandbox
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/BookingPaymentQuote'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/payments:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
       summary: 'Buat payment attempt booking (Midtrans Snap)'
-      description: 'Sandbox. Tenant pemesan memilih metode dari GET /bookings/{id}/payment-options. Nominal dihitung server: sewa + biaya platform dari snapshot booking + biaya admin metode. Halaman bayar Midtrans dibatasi ke metode itu. Memilih metode lain saat ada attempt aktif menutup attempt lama di Midtrans lalu membuat attempt baru dengan total baru; bila attempt lama masih diproses server menjawab 409 PAYMENT_IN_PROGRESS. Status paid hanya setelah verifikasi provider.'
+      description: 'Sandbox. Tenant pemesan memilih metode dari GET /bookings/{id}/payment-quotes dan mengirim expected_total yang ia lihat; bila total berubah server menjawab 409 PAYMENT_QUOTE_CHANGED. Nominal dihitung server: sewa dari snapshot booking ditambah biaya admin metode (biaya platform tidak dibebankan ke tenant). Halaman bayar Midtrans dibatasi ke channel metode itu. Memilih metode lain saat ada attempt aktif menutup attempt lama di Midtrans lalu membuat attempt baru dengan total baru; bila attempt lama masih diproses server menjawab 409 PAYMENT_ALREADY_OPEN. Metode snap lama tetap diterima dan memakai total snapshot booking. Status paid hanya setelah verifikasi provider.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -5118,8 +5147,19 @@ components:
       type: object
       required: [method]
       properties:
-        method: {type: string, pattern: '^[a-z0-9_]{1,40}$', description: Kode dari payment-options, misalnya bank_transfer, qris, atau gopay.}
+        method: {type: string, pattern: '^[a-z0-9_]{1,40}$', description: 'Kode dari payment-quotes, saat ini bca_va atau other_qris. snap tetap diterima untuk kompatibilitas.'}
+        expected_total: {type: integer, minimum: 1, description: Wajib untuk metode selain snap. Total dari payment-quotes yang dilihat pembayar.}
         description: {type: string, maxLength: 200}
+    BookingPaymentQuote:
+      type: object
+      required: [method, rent, admin, total]
+      properties:
+        method: {type: string, pattern: '^[a-z0-9_]{1,40}$'}
+        label: {type: string}
+        description: {type: string}
+        rent: {$ref: '#/components/schemas/Rupiah'}
+        admin: {$ref: '#/components/schemas/Rupiah'}
+        total: {$ref: '#/components/schemas/Rupiah'}
     PaymentMethodOption:
       type: object
       required: [code, label, fee, total, fee_source, refund_mode]
@@ -5129,18 +5169,16 @@ components:
         description: {type: string}
         fee: {$ref: '#/components/schemas/Rupiah'}
         total: {$ref: '#/components/schemas/Rupiah'}
-        fee_source: {type: string, enum: [estimate, contract], description: Estimate berarti tarif daftar Midtrans yang belum dikonfirmasi dengan kontrak merchant.}
+        fee_source: {type: string, enum: [estimate, contract], description: Estimate berarti tarif yang belum dikonfirmasi dengan kontrak merchant.}
         refund_mode: {type: string, enum: [api, manual]}
     PaymentOptions:
       type: object
-      required: [booking_id, status, expires_at, rent, platform_fee, subtotal, fee_bearer, payable, methods, attempt]
+      required: [booking_id, status, expires_at, rent, fee_bearer, payable, methods, attempt]
       properties:
         booking_id: {type: string, format: uuid}
         status: {type: string, enum: [held, payment_pending, confirmed, expired, cancelled]}
         expires_at: {type: string, format: date-time}
         rent: {$ref: '#/components/schemas/Rupiah'}
-        platform_fee: {$ref: '#/components/schemas/Rupiah'}
-        subtotal: {$ref: '#/components/schemas/Rupiah'}
         fee_bearer: {type: string, enum: [tenant]}
         payable: {type: boolean, description: False bila hold habis, acara tidak menerima pemesanan, atau pembayaran belum tersedia.}
         methods: {type: array, items: {$ref: '#/components/schemas/PaymentMethodOption'}}
@@ -5195,6 +5233,7 @@ components:
       required: [plan_code]
       properties:
         plan_code: {type: string, minLength: 1}
+        capacity_stands: {type: integer, minimum: 101, maximum: 500, description: Wajib khusus paket Custom. Tambahan Rp5000 per stand di atas 100.}
         method: {type: string, enum: [snap], description: Wajib untuk paket berbayar.}
     PlanCheckout:
       type: object
