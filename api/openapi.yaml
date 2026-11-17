@@ -5528,8 +5528,8 @@ paths:
     get:
       tags: [Unggahan]
       operationId: getPublicUpload
-      summary: Baca banner acara
-      description: Hanya unggahan event_banner yang ready. Tujuan lain selalu 404.
+      summary: Baca banner acara atau foto produk pengisi stand
+      description: Banner acara yang ready, atau foto produk aktif milik usaha dengan booking terkonfirmasi di acara yang sedang terbit. Selain itu 404.
       x-implementation-status: implemented
       security: []
       parameters:
@@ -6838,6 +6838,23 @@ components:
             enum: [available, booked, unavailable]
             description: booked untuk reservasi; unavailable untuk stand nonaktif atau sedang di-hold.
           base_price: {$ref: '#/components/schemas/Rupiah'}
+          occupant:
+            type: object
+            description: Usaha pada stand dengan booking terkonfirmasi. Tidak ada untuk stand lain atau booking yang belum lunas.
+            required: [business_name, category, products]
+            properties:
+              business_name: {type: string}
+              category: {type: string}
+              products:
+                type: array
+                maxItems: 6
+                items:
+                  type: object
+                  required: [name, price]
+                  properties:
+                    name: {type: string}
+                    price: {$ref: '#/components/schemas/Rupiah'}
+                    photo_upload_id: {type: string, format: uuid, description: 'Dibaca lewat GET /public/uploads/{id}.'}
     PublicLayout:
       type: object
       required: [event_id, event_name, event_slot_id, revision, width, height, cell_meters, blocks, stands, areas]
