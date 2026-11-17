@@ -16,16 +16,18 @@ type Store struct {
 }
 
 type Product struct {
-	ID         string     `json:"id"`
-	BusinessID string     `json:"business_id"`
-	Name       string     `json:"name"`
-	SKU        *string    `json:"sku,omitempty"`
-	Price      int64      `json:"price"`
-	Cost       *int64     `json:"cost,omitempty"`
-	CategoryID *string    `json:"category_id,omitempty"`
-	Stock      int32      `json:"stock"`
-	ArchivedAt *time.Time `json:"archived_at,omitempty"`
-	CreatedAt  time.Time  `json:"-"`
+	ID         string  `json:"id"`
+	BusinessID string  `json:"business_id"`
+	Name       string  `json:"name"`
+	SKU        *string `json:"sku,omitempty"`
+	Price      int64   `json:"price"`
+	Cost       *int64  `json:"cost,omitempty"`
+	CategoryID *string `json:"category_id,omitempty"`
+	Stock      int32   `json:"stock"`
+	// PhotoUploadID menunjuk unggahan ready; file dibaca lewat GET /uploads/{id}/file.
+	PhotoUploadID *string    `json:"photo_upload_id,omitempty"`
+	ArchivedAt    *time.Time `json:"archived_at,omitempty"`
+	CreatedAt     time.Time  `json:"-"`
 }
 
 // optional membedakan field yang tidak dikirim dari field yang dikirim null (untuk mengosongkan nilai).
@@ -74,12 +76,12 @@ type listFilter struct {
 }
 
 const productColumns = `p.id::text, p.business_id::text, p.name, p.sku, p.price, p.cost, p.category_id::text,
-	p.stock, p.archived_at, p.created_at`
+	p.stock, p.photo_upload_id::text, p.archived_at, p.created_at`
 
 func scanProduct(row pgx.Row) (Product, error) {
 	var value Product
 	err := row.Scan(&value.ID, &value.BusinessID, &value.Name, &value.SKU, &value.Price, &value.Cost,
-		&value.CategoryID, &value.Stock, &value.ArchivedAt, &value.CreatedAt)
+		&value.CategoryID, &value.Stock, &value.PhotoUploadID, &value.ArchivedAt, &value.CreatedAt)
 	return value, err
 }
 
@@ -126,16 +128,19 @@ func (s Store) create(ctx context.Context, actor, business string, input product
 		if err := requireMember(ctx, tx, actor, business, true); err != nil {
 			return err
 		}
+		if err := checkPhoto(ctx, tx, business, input.PhotoUploadID.Value); err != nil {
+			return err
+		}
 		var stock int32
 		if input.InitialStock.Value != nil {
 			stock = *input.InitialStock.Value
 		}
 		var err error
 		result, err = scanProduct(tx.QueryRow(ctx, `INSERT INTO products AS p
-			(business_id, name, sku, price, cost, category_id, stock, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING `+productColumns,
+			(business_id, name, sku, price, cost, category_id, stock, created_by, photo_upload_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING `+productColumns,
 			business, *input.Name.Value, input.SKU.Value, *input.Price.Value, input.Cost.Value,
-			input.CategoryID.Value, stock, actor))
+			input.CategoryID.Value, stock, actor, input.PhotoUploadID.Value))
 		if err != nil {
 			return err
 		}
@@ -177,6 +182,12 @@ func (s Store) update(ctx context.Context, actor, id string, input productInput)
 		if input.CategoryID.Set {
 			current.CategoryID = input.CategoryID.Value
 		}
+		if input.PhotoUploadID.Set {
+			if err := checkPhoto(ctx, tx, current.BusinessID, input.PhotoUploadID.Value); err != nil {
+				return err
+			}
+			current.PhotoUploadID = input.PhotoUploadID.Value
+		}
 		archive := current.ArchivedAt != nil
 		if input.Archived.Set {
 			archive = *input.Archived.Value
@@ -184,9 +195,9 @@ func (s Store) update(ctx context.Context, actor, id string, input productInput)
 		result, err = scanProduct(tx.QueryRow(ctx, `UPDATE products AS p SET name = $2, sku = $3, price = $4,
 			cost = $5, category_id = $6,
 			archived_at = CASE WHEN $7 THEN COALESCE(p.archived_at, clock_timestamp()) ELSE NULL END,
-			updated_at = clock_timestamp()
+			photo_upload_id = $8, updated_at = clock_timestamp()
 			WHERE p.id = $1 RETURNING `+productColumns,
-			id, current.Name, current.SKU, current.Price, current.Cost, current.CategoryID, archive))
+			id, current.Name, current.SKU, current.Price, current.Cost, current.CategoryID, archive, current.PhotoUploadID))
 		return err
 	})
 	return result, err
@@ -215,6 +226,24 @@ func (s Store) adjustStock(ctx context.Context, actor, id string, input stockInp
 		return err
 	})
 	return result, err
+}
+
+var errPhotoUnavailable = errors.New("photo upload unavailable")
+
+// checkPhoto memastikan foto adalah unggahan foto produk yang sudah lolos pemeriksaan dan milik usaha yang sama.
+func checkPhoto(ctx context.Context, tx pgx.Tx, business string, photo *string) error {
+	if photo == nil {
+		return nil
+	}
+	var ok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM uploads WHERE id = $1 AND status = 'ready'
+		AND purpose = 'product_photo' AND owner_type = 'business' AND owner_id = $2)`, *photo, business).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return errPhotoUnavailable
+	}
+	return nil
 }
 
 func nilIfEmpty(value string) *string {

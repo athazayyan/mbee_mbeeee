@@ -91,7 +91,11 @@ func validateProduct(input *productInput, create bool) fieldErrors {
 		}
 	}
 	if input.PhotoUploadID.Value != nil {
-		fields["photo_upload_id"] = "Unggah foto produk belum tersedia."
+		id := strings.ToLower(*input.PhotoUploadID.Value)
+		input.PhotoUploadID.Value = &id
+		if !httpapi.ValidID(id) {
+			fields["photo_upload_id"] = "Unggah ulang foto produk."
+		}
 	}
 	if input.InitialStock.Set {
 		switch {
@@ -105,7 +109,7 @@ func validateProduct(input *productInput, create bool) fieldErrors {
 		fields["archived"] = "Status arsip hanya bisa diubah pada produk yang sudah ada."
 	}
 	if !create && !input.Name.Set && !input.SKU.Set && !input.Price.Set && !input.Cost.Set &&
-		!input.CategoryID.Set && !input.Archived.Set {
+		!input.CategoryID.Set && !input.Archived.Set && !input.PhotoUploadID.Set {
 		fields["name"] = "Isi setidaknya satu perubahan."
 	}
 	if len(fields) == 0 {
@@ -270,6 +274,9 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "SALE_ALREADY_VOIDED", "Transaksi ini sudah di-void.", nil)
 	case errors.Is(err, errNothingToAdjust):
 		httpapi.Error(c, http.StatusConflict, "NOTHING_TO_ADJUST", "Semua barang pada transaksi ini sudah dikembalikan.", nil)
+	case errors.Is(err, errPhotoUnavailable):
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian produk.",
+			map[string]string{"photo_upload_id": "Foto belum selesai diunggah atau bukan milik usaha ini."})
 	case errors.Is(err, errStockOverflow):
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.",
 			map[string]string{"delta": "Stok produk harus tetap di antara -1.000.000 dan 1.000.000."})
