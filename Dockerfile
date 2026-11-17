@@ -11,6 +11,7 @@ COPY *.go ./
 COPY api/ ./api/
 COPY internal/ ./internal/
 COPY migrations/ ./migrations/
+COPY seed_assets/ ./seed_assets/
 RUN go build -mod=readonly -trimpath -buildvcs=false -o /out/tenantku .
 
 FROM debian:bookworm-slim AS runtime
