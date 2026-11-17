@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,8 @@ var (
 	ErrNotPayable          = errors.New("booking is not payable")
 	ErrIdempotencyMismatch = errors.New("idempotency key reused with a different request")
 	ErrUnavailable         = errors.New("payments are not configured")
+	ErrQuoteChanged        = errors.New("payment total requires confirmation")
+	ErrPaymentInProgress   = errors.New("a payment for this booking is already open")
 )
 
 type Store struct {
@@ -37,12 +40,26 @@ type Attempt struct {
 }
 
 type Input struct {
-	Method      string `json:"method"`
-	Description string `json:"description"`
+	Method        string `json:"method"`
+	Description   string `json:"description"`
+	ExpectedTotal *int64 `json:"expected_total,omitempty"`
+}
+
+const bookingFeeVersion = "midtrans-sandbox-v1"
+
+func bookingAdmin(method string) (int64, bool) {
+	switch method {
+	case "bca_va":
+		return 4000, true
+	case "other_qris":
+		return 0, true
+	default:
+		return 0, false
+	}
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount FROM payment_attempts, payment_events, payment_exceptions,
+	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount, payment_attempts.fee_version FROM payment_attempts, payment_events, payment_exceptions,
 		ledger_transactions, ledger_entries, event_plans, event_plan_purchases LIMIT 0`)
 	return err
 }
@@ -61,7 +78,15 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 	if s.Provider == nil {
 		return Attempt{}, false, ErrUnavailable
 	}
-	digest := sha256.Sum256([]byte(bookingID + "\x00" + input.Method + "\x00" + input.Description))
+	admin, selected := bookingAdmin(input.Method)
+	request := bookingID + "\x00" + input.Method + "\x00" + input.Description
+	if selected {
+		if input.ExpectedTotal == nil {
+			return Attempt{}, false, ErrQuoteChanged
+		}
+		request += "\x00" + strconv.FormatInt(*input.ExpectedTotal, 10)
+	}
+	digest := sha256.Sum256([]byte(request))
 	var result Attempt
 	var created bool
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) error {
@@ -106,6 +131,15 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		live, err := scanAttempt(tx.QueryRow(ctx, `SELECT `+attemptColumns+` FROM payment_attempts
 			WHERE booking_id = $1 AND status IN ('created', 'pending')`, bookingID))
 		if err == nil {
+			if selected {
+				var method string
+				if err := tx.QueryRow(ctx, `SELECT method FROM payment_attempts WHERE id = $1`, live.ID).Scan(&method); err != nil {
+					return err
+				}
+				if method != input.Method || live.Amount != *input.ExpectedTotal {
+					return ErrPaymentInProgress
+				}
+			}
 			result = live
 			return nil
 		}
@@ -113,11 +147,20 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 			return err
 		}
 
+		var version *string
+		if selected {
+			total, platformFee, providerFee = rent+admin, 0, admin
+			if total < 1 || total > 9007199254740991 || total != *input.ExpectedTotal {
+				return ErrQuoteChanged
+			}
+			value := bookingFeeVersion
+			version = &value
+		}
 		result, err = scanAttempt(tx.QueryRow(ctx, `INSERT INTO payment_attempts
 			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
-			rent_amount, platform_fee_amount, provider_fee_amount)
-			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9, $10) RETURNING `+attemptColumns,
-			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee))
+			rent_amount, platform_fee_amount, provider_fee_amount, fee_version)
+			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9, $10, $11) RETURNING `+attemptColumns,
+			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee, version))
 		if err != nil {
 			return err
 		}
@@ -150,12 +193,15 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 			result = attempt
 			return nil
 		}
-		var eventName string
+		var eventName, method string
+		var rent, admin int64
 		var remainingSeconds float64
-		err = tx.QueryRow(ctx, `SELECT e.name, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8
+		err = tx.QueryRow(ctx, `SELECT e.name, EXTRACT(EPOCH FROM (b.expires_at - clock_timestamp()))::float8,
+			p.method, COALESCE(p.rent_amount, b.rent), COALESCE(p.provider_fee_amount, b.provider_fee)
 			FROM bookings b JOIN events e ON e.id = b.event_id
-			WHERE b.id = $1 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID).
-			Scan(&eventName, &remainingSeconds)
+			JOIN payment_attempts p ON p.booking_id = b.id
+			WHERE b.id = $1 AND p.id = $2 AND b.status = 'payment_pending' AND e.status IN ('published', 'live')`, bookingID, id).
+			Scan(&eventName, &remainingSeconds, &method, &rent, &admin)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPayable
 		}
@@ -169,9 +215,17 @@ func (s Store) openAttempt(ctx context.Context, id, bookingID, email string) (At
 		if len([]rune(name)) > 50 {
 			name = string([]rune(name)[:50])
 		}
-		snap, err := s.Provider.CreateSnap(ctx, id, attempt.Amount, email,
-			[]snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: "Sewa stand " + name}},
-			time.Duration(remainingSeconds*float64(time.Second)))
+		items := []snapItem{{ID: bookingID, Price: attempt.Amount, Quantity: 1, Name: "Sewa stand " + name}}
+		var channels []string
+		if _, selected := bookingAdmin(method); selected {
+			channels = []string{method}
+			items[0].Price = rent
+			if admin > 0 {
+				items = append(items, snapItem{ID: "payment-admin", Price: admin, Quantity: 1, Name: "Biaya admin"})
+			}
+		}
+		snap, err := s.Provider.CreateSnap(ctx, id, attempt.Amount, email, items,
+			time.Duration(remainingSeconds*float64(time.Second)), channels...)
 		if err != nil {
 			return err
 		}

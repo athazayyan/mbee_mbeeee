@@ -319,6 +319,41 @@ func TestPaymentLifecycle(t *testing.T) {
 	if count(t, ctx, s, `SELECT count(*) FROM payment_exceptions WHERE kind = 'unknown_order'`) != 1 {
 		t.Fatal("expected unknown_order exception")
 	}
+
+	selected := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000005")
+	var snap snapRequest
+	s.Provider.HTTP = &http.Client{Transport: snapTransport(func(req *http.Request) (*http.Response, error) {
+		defer req.Body.Close()
+		if err := json.NewDecoder(req.Body).Decode(&snap); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: http.StatusCreated,
+			Body: io.NopCloser(strings.NewReader(`{"token":"channel","redirect_url":"https://pay.example/channel"}`))}, nil
+	})}
+	total := int64(31500)
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k7", Input{Method: "bca_va", ExpectedTotal: &total}); !errors.Is(err, ErrQuoteChanged) {
+		t.Fatalf("stale total should be rejected: %v", err)
+	}
+	total = 34000
+	chosen, created, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k7", Input{Method: "bca_va", ExpectedTotal: &total})
+	if err != nil || !created || chosen.Amount != total || snap.TransactionDetails.GrossAmount != total ||
+		len(snap.EnabledPayments) != 1 || snap.EnabledPayments[0] != "bca_va" ||
+		len(snap.ItemDetails) != 2 || snap.ItemDetails[0].Price != 30000 || snap.ItemDetails[1].Price != 4000 {
+		t.Fatalf("confirmed channel and price: %+v %+v %v", chosen, snap, err)
+	}
+	total = 30000
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", selected, "k8", Input{Method: "other_qris", ExpectedTotal: &total}); !errors.Is(err, ErrPaymentInProgress) {
+		t.Fatalf("opening another method while an attempt is live: %v", err)
+	}
+	n, raw = notify(chosen.ID, "settlement", "200", "34000.00")
+	if err := s.ApplyNotification(ctx, n, raw); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, ctx, s, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE t.ref_id = $1 AND ((e.account = 'organizer_escrow' AND e.amount = 30000)
+		OR (e.account = 'provider_fee_payable' AND e.amount = 4000))`, chosen.ID) != 2 {
+		t.Fatal("settlement must use the selected quote and preserve rent")
+	}
 }
 
 func TestEventPlanPurchase(t *testing.T) {

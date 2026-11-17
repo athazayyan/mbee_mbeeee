@@ -2211,12 +2211,40 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/payment-quotes:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: listBookingPaymentQuotes
+      summary: Lihat biaya pembayaran booking per metode
+      description: Menggunakan harga sewa pada snapshot booking. Admin QRIS untuk pembayar adalah nol.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Pilihan pembayaran sandbox
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: {$ref: '#/components/schemas/BookingPaymentQuote'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        default: {$ref: '#/components/responses/Error'}
   /bookings/{id}/payments:
     post:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
       summary: 'Buat payment attempt booking (Midtrans Snap)'
-      description: Sandbox. Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
+      description: Sandbox. Tenant pemesan. Untuk metode spesifik, konfirmasi expected_total dari payment-quotes. Snap menerima metode yang dikonfirmasi. Status paid hanya setelah verifikasi provider.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -5090,8 +5118,17 @@ components:
       type: object
       required: [method]
       properties:
-        method: {type: string, minLength: 1}
+        method: {type: string, enum: [bca_va, other_qris, snap]}
+        expected_total: {type: integer, minimum: 1, description: Wajib untuk metode spesifik dari payment-quotes.}
         description: {type: string, maxLength: 200}
+    BookingPaymentQuote:
+      type: object
+      required: [method, rent, admin, total]
+      properties:
+        method: {type: string, enum: [bca_va, other_qris]}
+        rent: {$ref: '#/components/schemas/Rupiah'}
+        admin: {$ref: '#/components/schemas/Rupiah'}
+        total: {$ref: '#/components/schemas/Rupiah'}
     PaymentAttempt:
       type: object
       required: [id, status, amount, currency, provider]

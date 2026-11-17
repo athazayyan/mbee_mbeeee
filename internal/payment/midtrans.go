@@ -46,6 +46,7 @@ func NewMidtrans(serverKey, env string) *Midtrans {
 }
 
 type snapRequest struct {
+	EnabledPayments    []string `json:"enabled_payments,omitempty"`
 	TransactionDetails struct {
 		OrderID     string `json:"order_id"`
 		GrossAmount int64  `json:"gross_amount"`
@@ -73,8 +74,9 @@ type SnapResult struct {
 }
 
 // CreateSnap opens a Snap transaction. expiry is rounded up to whole minutes, minimum one.
-func (m *Midtrans) CreateSnap(ctx context.Context, orderID string, amount int64, email string, items []snapItem, expiry time.Duration) (SnapResult, error) {
+func (m *Midtrans) CreateSnap(ctx context.Context, orderID string, amount int64, email string, items []snapItem, expiry time.Duration, enabledPayments ...string) (SnapResult, error) {
 	var body snapRequest
+	body.EnabledPayments = enabledPayments
 	body.TransactionDetails.OrderID = orderID
 	body.TransactionDetails.GrossAmount = amount
 	body.CustomerDetails.Email = email

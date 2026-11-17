@@ -13,9 +13,8 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
-var methods = map[string]bool{"snap": true}
-
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
+	api.GET("/bookings/:id/payment-quotes", sessions.WithAccount(s.listBookingPaymentQuotes))
 	api.POST("/bookings/:id/payments", httpapi.RequireOrigin(origin), sessions.WithAccount(s.createPayment))
 	api.POST("/webhooks/payments/:provider", s.webhook)
 	s.planRoutes(api, sessions, origin)
@@ -36,9 +35,10 @@ func (s Store) createPayment(c *gin.Context, account auth.Account) {
 		return
 	}
 	input.Method = strings.ToLower(strings.TrimSpace(input.Method))
-	if !methods[input.Method] || len([]rune(input.Description)) > 200 {
+	_, supported := bookingAdmin(input.Method)
+	if (!supported && input.Method != "snap") || len([]rune(input.Description)) > 200 {
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Metode pembayaran tidak didukung.",
-			map[string]string{"method": "Gunakan snap."})
+			map[string]string{"method": "Pilih metode pembayaran yang tersedia."})
 		return
 	}
 	if !httpapi.ValidID(id) {
@@ -53,6 +53,10 @@ func (s Store) createPayment(c *gin.Context, account auth.Account) {
 		httpapi.Error(c, http.StatusConflict, "BOOKING_NOT_PAYABLE", "Booking sudah tidak dapat dibayar.", nil)
 	case errors.Is(err, ErrIdempotencyMismatch):
 		httpapi.Error(c, http.StatusConflict, "IDEMPOTENCY_PAYLOAD_MISMATCH", "Kunci ini sudah dipakai untuk permintaan lain.", nil)
+	case errors.Is(err, ErrQuoteChanged):
+		httpapi.Error(c, http.StatusConflict, "PAYMENT_QUOTE_CHANGED", "Muat ulang rincian biaya lalu konfirmasi total pembayaran.", nil)
+	case errors.Is(err, ErrPaymentInProgress):
+		httpapi.Error(c, http.StatusConflict, "PAYMENT_ALREADY_OPEN", "Pembayaran lain masih aktif untuk booking ini.", nil)
 	case errors.Is(err, ErrProvider):
 		httpapi.LogInternalError(c, "payment provider failed", err)
 		httpapi.Error(c, http.StatusServiceUnavailable, "PAYMENT_PROVIDER_UNAVAILABLE", "Penyedia pembayaran sedang tidak tersedia. Coba lagi.", nil)
