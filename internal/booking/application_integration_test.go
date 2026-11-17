@@ -62,6 +62,12 @@ func TestCuratedApplications(t *testing.T) {
 	if err := s.SetRegistrationMode(ctx, organizer, event, "curated"); err != nil {
 		t.Fatal(err)
 	}
+	if mode, err := s.RegistrationMode(ctx, tenantA, event); err != nil || mode != "curated" {
+		t.Fatalf("registration mode: %q %v", mode, err)
+	}
+	if _, err := s.RegistrationMode(ctx, tenantA, "bad"); !errors.Is(err, ErrApplicationInput) {
+		t.Fatalf("invalid event id: %v", err)
+	}
 	direct := HoldInput{BusinessID: businessA, EventID: event, StandID: testStandOne, EventSlotID: slot, AcceptedPolicyVersion: "test-policy"}
 	if _, err := s.CreateHold(ctx, tenantA, "direct", direct, HoldSettings{Lifetime: time.Minute, MaxActive: 1}, source); !errors.Is(err, ErrNotBookable) {
 		t.Fatalf("direct hold on curated event: %v", err)
