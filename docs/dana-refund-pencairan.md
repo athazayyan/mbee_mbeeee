@@ -90,7 +90,7 @@ mengikuti jalur refund di atas.
 ## Menjalankan
 
 ```sh
-make migrate                       # migrasi 00037
+make migrate                       # migrasi 00038
 # terapkan ulang deploy/postgres/runtime.sql (-v payment_sandbox=true)
 go run . payments process          # refund dan penutupan transaksi, jalankan berkala
 ```
