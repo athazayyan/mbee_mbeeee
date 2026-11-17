@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,26 @@ func newUUID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
+// seedStandTypes picks stand types for a demo zone from its label, cycled so a zone looks like a real bazar row:
+// mostly the zone's main type with a few neighbours (a dessert stand between food stalls, a photobooth in a craft row).
+func seedStandTypes(label string) []string {
+	lower := strings.ToLower(label)
+	switch {
+	case strings.Contains(lower, "kopi") || strings.Contains(lower, "minuman"):
+		return []string{"minuman", "minuman", "dessert"}
+	case strings.Contains(lower, "jajanan") || strings.Contains(lower, "pendamping"):
+		return []string{"dessert", "fresh_product", "dessert", "makanan_berat"}
+	case strings.Contains(lower, "oleh"):
+		return []string{"fresh_product", "aksesoris", "dessert"}
+	case strings.Contains(lower, "kreatif"):
+		return []string{"aksesoris", "photobooth", "beauty", "pakaian"}
+	case strings.Contains(lower, "fesyen") || strings.Contains(lower, "kriya"):
+		return []string{"pakaian", "aksesoris", "beauty", "pakaian"}
+	default:
+		return []string{"makanan_berat", "makanan_berat", "minuman", "makanan_berat", "dessert", "makanan_berat"}
+	}
+}
+
 // SeedLayout builds a walkable demo layout: an entrance row, a walkway, then one block per zone with 2x2 stands
 // in rows of three. It returns the layout and the stands in it.
 func seedLayout(blocks []SeedBlock) (layoutInput, []SeedStand, []blockPrice, error) {
@@ -57,6 +78,7 @@ func seedLayout(blocks []SeedBlock) (layoutInput, []SeedStand, []blockPrice, err
 		x := 1 + i*(blockWidth+gap)
 		layout.Blocks = append(layout.Blocks, layoutBlock{ID: blockID, Label: spec.Label, layoutRect: layoutRect{X: x, Y: 3, Width: blockWidth, Height: 2 * rows}})
 		letter := string(rune('A' + i))
+		types := seedStandTypes(spec.Label)
 		for n := 0; n < spec.Stands; n++ {
 			standID, err := newUUID()
 			if err != nil {
@@ -64,8 +86,10 @@ func seedLayout(blocks []SeedBlock) (layoutInput, []SeedStand, []blockPrice, err
 			}
 			code := fmt.Sprintf("%s%d", letter, n+1)
 			block := blockID
+			standType := types[n%len(types)]
 			layout.Stands = append(layout.Stands, layoutStand{
 				ID: standID, BlockID: &block, Code: code, Active: true, CategoryIDs: []string{}, Facilities: []string{"Listrik 450 watt"},
+				Type:       &standType,
 				layoutRect: layoutRect{X: x + 2*(n%perRow), Y: 3 + 2*(n/perRow), Width: 2, Height: 2},
 			})
 			stands = append(stands, SeedStand{ID: standID, Code: code, Block: spec.Label})
@@ -74,7 +98,8 @@ func seedLayout(blocks []SeedBlock) (layoutInput, []SeedStand, []blockPrice, err
 	layout.Width = 1 + len(blocks)*(blockWidth+gap)
 	layout.Height = 3 + 2*maxRows + 3
 	layout.Areas = []layoutArea{
-		{Kind: "entrance", layoutRect: layoutRect{X: 0, Y: 0, Width: layout.Width, Height: 1}},
+		{Kind: "entrance", layoutRect: layoutRect{X: 0, Y: 0, Width: 4, Height: 1}},
+		{Kind: "exit", layoutRect: layoutRect{X: layout.Width - 4, Y: 0, Width: 4, Height: 1}},
 		{Kind: "walkway", layoutRect: layoutRect{X: 0, Y: 1, Width: layout.Width, Height: 2}},
 		{Kind: "stage", layoutRect: layoutRect{X: 1, Y: layout.Height - 2, Width: min(10, layout.Width-2), Height: 2}},
 	}

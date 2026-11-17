@@ -6782,6 +6782,10 @@ components:
         category_ids: {type: array, items: {type: string, format: uuid}, description: Kosong berarti semua kategori boleh.}
         facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         active: {type: boolean}
+        stand_type:
+          type: string
+          enum: [makanan_berat, minuman, dessert, fresh_product, pakaian, aksesoris, beauty, photobooth, lainnya]
+          description: Jenis stand untuk ilustrasi di editor dan peta tenant. Kosong berarti stand umum.
     LayoutBlock:
       type: object
       required: [id, label, x, y, width, height]
@@ -6796,7 +6800,7 @@ components:
       type: object
       required: [kind, x, y, width, height]
       properties:
-        kind: {type: string, enum: [walkway, entrance, stage, restricted]}
+        kind: {type: string, enum: [walkway, entrance, exit, stage, restricted]}
         x: {type: integer, minimum: 0}
         y: {type: integer, minimum: 0}
         width: {type: integer, minimum: 1}

@@ -111,8 +111,8 @@ GRANT INSERT (event_id, revision, width, height, cell_meters, updated_by),
 GRANT INSERT (id, event_id, label, x, y, width, height),
     UPDATE (label, x, y, width, height), DELETE ON public.layout_blocks TO :"api_role";
 GRANT INSERT (event_id, kind, x, y, width, height), DELETE ON public.layout_areas TO :"api_role";
-GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active),
-    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, removed_at)
+GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, category_ids, facilities, active, stand_type),
+    UPDATE (block_id, code, x, y, width, height, rotation, category_ids, facilities, active, stand_type, removed_at)
     ON public.stands TO :"api_role";
 GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
 GRANT SELECT (id) ON public.booking_status_history TO :"api_role";
