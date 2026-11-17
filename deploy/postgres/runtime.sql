@@ -88,6 +88,8 @@ REVOKE SELECT (id, kind, ref_type, ref_id), INSERT (kind, ref_type, ref_id, reve
 REVOKE SELECT (transaction_id, account, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries FROM :"api_role";
 REVOKE SELECT ON public.payment_methods FROM :"api_role";
+REVOKE UPDATE (enabled, fee_flat, fee_bps, fee_source, fee_version, refund_mode, updated_at)
+    ON public.payment_methods FROM :"api_role";
 
 GRANT SELECT ON public.business_categories, public.businesses, public.organizations, public.memberships,
     public.consent_events, public.events, public.event_slots, public.event_status_history,
@@ -197,6 +199,8 @@ GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantit
     ON public.sale_items TO :"api_role";
 -- Admin platform (E16): keanggotaan admin hanya dibaca API; pemberian lewat perintah grant-admin.
 GRANT SELECT ON public.platform_admins, public.admin_audit, public.plan_price_versions, public.plan_prices TO :"api_role";
+-- Katalog metode bayar dipakai oleh admin dan readiness, termasuk saat sandbox nonaktif.
+GRANT SELECT ON public.payment_methods TO :"api_role";
 GRANT INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id) ON public.admin_audit TO :"api_role";
 GRANT UPDATE (verification_status, verified_at) ON public.organizations TO :"api_role";
 -- E16-03: a price list is only ever added, never edited; E16-02 searches bookings.
@@ -252,7 +256,7 @@ GRANT UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_
 GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"worker_role";
 GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"worker_role";
-GRANT SELECT ON public.payment_methods TO :"api_role", :"worker_role";
+GRANT SELECT ON public.payment_methods TO :"worker_role";
 -- E16-02/03: admins search payments, work the exception queue, and change fees for future attempts only.
 GRANT SELECT (booking_id, created_at, resolved_by, resolved_at, resolution_note),
     UPDATE (resolved_by, resolved_at, resolution_note) ON public.payment_exceptions TO :"api_role";

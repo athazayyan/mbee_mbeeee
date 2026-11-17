@@ -75,6 +75,29 @@ Profil `tenantku-migration` menggunakan koneksi pemilik database. Ganti nilai `a
 
 Set `DATABASE_URL` pada proses API ke akun API dan pada proses worker ke akun worker. Berikan `JWT_SIGNING_KEY`, `REFRESH_TOKEN_PEPPER`, dan `APP_ORIGIN` pada proses API. Set `API_DOCS_ENABLED=false` untuk API publik.
 
+## Docker dan Coolify
+
+Buat dua resource dari repo backend dengan **Build pack** Dockerfile, **Base directory** `/`, dan **Dockerfile location** `/Dockerfile`. Pilih server dan jaringan Docker yang sama dengan PostgreSQL.
+
+| Resource | Dockerfile target | Port internal | Health check | Penyimpanan |
+| --- | --- | --- | --- | --- |
+| API | `api` | `8080` | `/readyz` | Named volume di `/app/uploads` |
+| Worker | `worker` | `8081` | `/readyz` pada loopback container | Tidak perlu |
+
+Gunakan health check bawaan image. Nonaktifkan pengganti health check di dashboard Coolify jika aktif. Worker tidak memerlukan domain atau port mapping ke host. Kedua container berjalan sebagai UID/GID `10001:10001`. Jika memasang direktori host atau memakai volume upload lama, pastikan UID/GID tersebut dapat membaca dan menulis di sana sebelum deploy. Backup volume upload secara terpisah dari backup database.
+
+Gunakan **Postgres URL (internal)** untuk menyusun URL koneksi tiap role. Simpan semua kredensial sebagai environment variable runtime di Coolify. Pada PostgreSQL 18, image standar menyimpan data di bawah mount `/var/lib/postgresql`. Pertahankan volume database yang sudah digunakan Coolify.
+
+Jalankan migration sebagai langkah rilis terpisah sebelum menyalakan API dan worker. Image API memiliki perintah `migrate` dan SQL migration sudah tertanam di binary. Contoh dari root repo pada server dan jaringan Docker yang sama dengan PostgreSQL:
+
+```bash
+docker build --target api -t tenantku-api:release .
+docker run --rm --network "$TENANTKU_DESTINATION_NETWORK" \
+  --env-file "$TENANTKU_MIGRATION_ENV_FILE" tenantku-api:release migrate
+```
+
+Isi `TENANTKU_DESTINATION_NETWORK` dengan nama jaringan Docker resource PostgreSQL dan `TENANTKU_MIGRATION_ENV_FILE` dengan path file privat di luar repo. File tersebut hanya berisi `DATABASE_URL` akun migration. Lalu jalankan `deploy/postgres/runtime.sql` dengan `psql` seperti di atas untuk memberikan hak kepada role API dan worker.
+
 ## Mengaktifkan quote dan hold
 
 Setelah migration, pasang kebijakan booking yang disetujui dengan role pemilik database.
