@@ -39,7 +39,7 @@ func (s Store) ProcessCancellationRefund(ctx context.Context) error {
 		case !matchesRefundOrder(verified, original):
 			state = "manual_review"
 		case verified.confirmsRefund(key, amount):
-			return confirmCancellationRefund(ctx, tx, booking, amount)
+			return confirmCancellationRefund(ctx, tx, booking, amount, "provider_clearing")
 		case listed && !matches:
 			state = "manual_review"
 		case listed:
@@ -77,14 +77,14 @@ func refundListed(n Notification, key string, amount int64) (bool, bool) {
 	return false, false
 }
 
-func confirmCancellationRefund(ctx context.Context, tx pgx.Tx, booking string, amount int64) error {
+func confirmCancellationRefund(ctx context.Context, tx pgx.Tx, booking string, amount int64, creditAccount string) error {
 	var transaction string
 	if err := tx.QueryRow(ctx, `INSERT INTO ledger_transactions (kind, ref_type, ref_id)
 		VALUES ('event_cancellation_refund', 'booking', $1) RETURNING id`, booking).Scan(&transaction); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries (transaction_id, account, direction, amount) VALUES
-		($1, 'organizer_escrow', 'debit', $2), ($1, 'provider_clearing', 'credit', $2)`, transaction, amount); err != nil {
+		($1, 'organizer_escrow', 'debit', $2), ($1, $3, 'credit', $2)`, transaction, amount, creditAccount); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE event_cancellation_refunds SET status = 'confirmed',
