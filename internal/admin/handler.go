@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
@@ -17,31 +18,26 @@ const maxInput = 4 << 10
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/plans/catalog", s.listPlans)
 	api.GET("/plans/quote", s.quote)
-	api.GET("/admin/overview", sessions.WithAccount(s.withAdmin(s.getOverview)))
-	api.GET("/admin/organizations", sessions.WithAccount(s.withAdmin(s.listOrganizations)))
-	api.GET("/admin/users", sessions.WithAccount(s.withAdmin(s.listUsers)))
-	api.GET("/admin/audit", sessions.WithAccount(s.withAdmin(s.listAudit)))
+	api.GET("/admin/overview", sessions.WithAccount(s.withPermission(adminperm.DirectoryRead, s.getOverview)))
+	api.GET("/admin/organizations", sessions.WithAccount(s.withPermission(adminperm.DirectoryRead, s.listOrganizations)))
+	api.GET("/admin/users", sessions.WithAccount(s.withPermission(adminperm.DirectoryRead, s.listUsers)))
+	api.GET("/admin/events", sessions.WithAccount(s.withPermission(adminperm.DirectoryRead, s.listEvents)))
+	api.GET("/admin/audit", sessions.WithAccount(s.withPermission(adminperm.AuditRead, s.listAudit)))
+	api.GET("/admin/bookings", sessions.WithAccount(s.withPermission(adminperm.PaymentsRead, s.listBookings)))
+	api.GET("/admin/payments", sessions.WithAccount(s.withPermission(adminperm.PaymentsRead, s.listPayments)))
+	api.GET("/admin/payment-exceptions", sessions.WithAccount(s.withPermission(adminperm.PaymentsRead, s.listExceptions)))
+	api.GET("/admin/payment-methods", sessions.WithAccount(s.withPermission(adminperm.PricingManage, s.listMethodFees)))
+	api.GET("/admin/plan-prices", sessions.WithAccount(s.withPermission(adminperm.PricingManage, s.listPlanVersions)))
 	mutations := api.Group("")
 	if sessions != nil {
 		mutations.Use(httpapi.RequireOrigin(origin))
 	}
 	mutations.POST("/admin/organizations/:id/verification", sessions.WithAccount(s.verifyOrganization))
-}
-
-// withAdmin menolak akun yang bukan admin platform. Mutasi memeriksa ulang di dalam transaksinya.
-func (s Store) withAdmin(next func(*gin.Context, auth.Account)) func(*gin.Context, auth.Account) {
-	return func(c *gin.Context, account auth.Account) {
-		admin, err := s.IsAdmin(c.Request.Context(), account.ID)
-		if err != nil {
-			writeError(c, err)
-			return
-		}
-		if !admin {
-			writeError(c, errForbidden)
-			return
-		}
-		next(c, account)
-	}
+	mutations.POST("/admin/payment-exceptions/:id/resolve", sessions.WithAccount(s.resolveExceptionHandler))
+	mutations.POST("/admin/payments/:id/recheck", sessions.WithAccount(s.recheckHandler))
+	mutations.POST("/admin/ledger/:id/reverse", sessions.WithAccount(s.reverseLedgerHandler))
+	mutations.PUT("/admin/payment-methods/:code", sessions.WithAccount(s.updateMethodHandler))
+	mutations.POST("/admin/plan-prices", sessions.WithAccount(s.publishVersionHandler))
 }
 
 func (s Store) listPlans(c *gin.Context) {
@@ -162,6 +158,14 @@ func (s Store) listAudit(c *gin.Context, _ auth.Account) {
 		fields["action"] = "Gunakan nama aksi yang valid."
 	}
 	filter.Status = action
+	filter.ResourceType = strings.TrimSpace(c.Query("resource_type"))
+	if filter.ResourceType != "" && !httpapi.ValidSingleLine(filter.ResourceType, 40) {
+		fields["resource_type"] = "Gunakan jenis resource yang valid."
+	}
+	filter.ResourceID = strings.ToLower(strings.TrimSpace(c.Query("resource_id")))
+	if filter.ResourceID != "" && !httpapi.ValidID(filter.ResourceID) {
+		fields["resource_id"] = "Gunakan ID resource yang valid."
+	}
 	if len(fields) > 0 {
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa filter.", fields)
 		return
@@ -218,11 +222,20 @@ func (s Store) verifyOrganization(c *gin.Context, account auth.Account) {
 }
 
 func writeError(c *gin.Context, err error) {
+	var invalid fieldError
 	switch {
 	case errors.Is(err, errForbidden):
 		httpapi.Error(c, http.StatusForbidden, "ADMIN_REQUIRED", "Halaman ini khusus admin platform.", nil)
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Data tidak ditemukan.", nil)
+	case errors.Is(err, errConflict):
+		httpapi.Error(c, http.StatusConflict, "PRICE_VERSION_CONFLICT", "Sudah ada daftar harga lain pada waktu berlaku yang sama.", nil)
+	case errors.Is(err, errNotReversible):
+		httpapi.Error(c, http.StatusConflict, "LEDGER_NOT_REVERSIBLE", "Transaksi ledger ini tidak dapat dikoreksi dengan pembalikan.", nil)
+	case errors.Is(err, errUnavailable):
+		httpapi.Error(c, http.StatusServiceUnavailable, "PROVIDER_UNAVAILABLE", "Penyedia pembayaran belum dikonfigurasi.", nil)
+	case errors.As(err, &invalid):
+		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isian.", invalid)
 	default:
 		httpapi.LogInternalError(c, "admin request failed", err)
 		httpapi.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Permintaan admin belum dapat diproses.", nil)

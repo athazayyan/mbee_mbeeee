@@ -128,9 +128,9 @@ GRANT INSERT (user_id, business_id, organization_id, role) ON public.memberships
 GRANT UPDATE (id) ON public.memberships TO :"api_role";
 GRANT INSERT (business_id, actor_id, purpose, granted, policy_version) ON public.consent_events TO :"api_role";
 GRANT INSERT (organization_id, created_by, name, slug, starts_at, ends_at, timezone,
-    city, address, description, facilities, terms),
+    city, address, description, facilities, terms, instagram),
     UPDATE (name, slug, starts_at, ends_at, timezone, city, address, description,
-    facilities, terms, status, updated_at) ON public.events TO :"api_role";
+    facilities, terms, instagram, status, updated_at) ON public.events TO :"api_role";
 GRANT INSERT (event_id, code, starts_at, ends_at), UPDATE (starts_at, ends_at) ON public.event_slots TO :"api_role";
 GRANT INSERT (event_id, actor_id, from_status, to_status, reason) ON public.event_status_history TO :"api_role";
 GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.event_pricing_versions TO :"api_role";
@@ -199,6 +199,10 @@ GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantit
 GRANT SELECT ON public.platform_admins, public.admin_audit, public.plan_price_versions, public.plan_prices TO :"api_role";
 GRANT INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id) ON public.admin_audit TO :"api_role";
 GRANT UPDATE (verification_status, verified_at) ON public.organizations TO :"api_role";
+-- E16-03: a price list is only ever added, never edited; E16-02 searches bookings.
+GRANT INSERT (effective_at, custom_price_per_tenant, created_by) ON public.plan_price_versions TO :"api_role";
+GRANT INSERT (version_id, code, name, capacity, price) ON public.plan_prices TO :"api_role";
+GRANT SELECT (id, business_id, event_id, status, rent, created_at) ON public.bookings TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";
@@ -234,7 +238,7 @@ GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_
     UPDATE (outcome, attempt_id) ON public.payment_events TO :"api_role";
 GRANT SELECT (id, attempt_id, kind, status, detail), INSERT (attempt_id, booking_id, kind, detail), UPDATE (status)
     ON public.payment_exceptions TO :"api_role";
-GRANT SELECT (id, kind, ref_type, ref_id), INSERT (kind, ref_type, ref_id, reverses) ON public.ledger_transactions TO :"api_role";
+GRANT SELECT (id, kind, ref_type, ref_id, reverses, created_at), INSERT (kind, ref_type, ref_id, reverses) ON public.ledger_transactions TO :"api_role";
 GRANT SELECT (transaction_id, account, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"api_role";
 GRANT SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount, method),
@@ -249,6 +253,10 @@ GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions
 GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"worker_role";
 GRANT SELECT ON public.payment_methods TO :"api_role", :"worker_role";
+-- E16-02/03: admins search payments, work the exception queue, and change fees for future attempts only.
+GRANT SELECT (booking_id, created_at, resolved_by, resolved_at, resolution_note),
+    UPDATE (resolved_by, resolved_at, resolution_note) ON public.payment_exceptions TO :"api_role";
+GRANT UPDATE (enabled, fee_flat, fee_bps, fee_source, fee_version, refund_mode, updated_at) ON public.payment_methods TO :"api_role";
 -- E09: check-in, refund, sengketa, dan pencairan. Cancelling an event also writes the booking history actor.
 GRANT INSERT (booking_id, actor_id, from_status, to_status, reason) ON public.booking_status_history TO :"api_role";
 GRANT SELECT (id, booking_id, to_status, reason, created_at) ON public.booking_status_history TO :"api_role";

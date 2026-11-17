@@ -129,3 +129,9 @@ export TENANTKU_TEST_DATABASE_URL='postgres://user:password@localhost:5432/tenan
 DATABASE_URL="$TENANTKU_TEST_DATABASE_URL" make migrate
 make check
 ```
+
+## Akun dan data demo
+
+`go run . seed-demo` (dengan akun migration) mengisi admin, lima penyelenggara dengan acara terbit di Banda Aceh dan Lhokseumawe, dan 30 tenant.
+Daftar akun, kata sandi, aturan satu acara per penyelenggara dan satu acara dalam satu waktu per tenant ada di [docs/akun-demo.md](docs/akun-demo.md).
+Panel admin, izin, tarif, dan kalkulator ada di [docs/panel-admin.md](docs/panel-admin.md).

@@ -4,8 +4,8 @@ package funds
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -66,22 +66,22 @@ func isOwner(ctx context.Context, tx pgx.Tx, actor, eventID string) (bool, error
 
 // requireAdmin checks platform admin rights inside the transaction that performs the action.
 func requireAdmin(ctx context.Context, tx pgx.Tx, actor string) error {
-	var admin bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, actor).Scan(&admin); err != nil {
+	allowed, err := adminperm.Has(ctx, tx, actor, adminperm.FundsManage)
+	if err != nil {
 		return err
 	}
-	if !admin {
+	if !allowed {
 		return ErrAdminRequired
 	}
 	return nil
 }
 
 func audit(ctx context.Context, tx pgx.Tx, actor, action, resourceType, resourceID, reason string, before, after any) error {
-	b, err := json.Marshal(before)
+	b, err := adminperm.Redacted(before)
 	if err != nil {
 		return err
 	}
-	a, err := json.Marshal(after)
+	a, err := adminperm.Redacted(after)
 	if err != nil {
 		return err
 	}

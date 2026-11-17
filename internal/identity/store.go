@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -10,6 +11,7 @@ import (
 )
 
 var errBusinessAlreadyExists = errors.New("account already owns a business")
+var errOrganizationAlreadyExists = errors.New("account already owns an organization")
 
 type Store struct {
 	DB *pgxpool.Pool
@@ -75,10 +77,8 @@ func (s Store) signup(ctx context.Context, userID string) (phone, eventName *str
 	return phone, eventName, err
 }
 
-func (s Store) isPlatformAdmin(ctx context.Context, userID string) (bool, error) {
-	var admin bool
-	err := s.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, userID).Scan(&admin)
-	return admin, err
+func (s Store) adminPermissions(ctx context.Context, userID string) ([]string, error) {
+	return adminperm.Of(ctx, s.DB, userID)
 }
 
 func (s Store) categories(ctx context.Context) ([]category, error) {
@@ -136,18 +136,35 @@ func (s Store) updateBusiness(ctx context.Context, userID, id string, name, cate
 	return scanBusiness(row)
 }
 
+// createOrganization gives an account one organizer profile. A second one is refused, like a second business.
 func (s Store) createOrganization(ctx context.Context, userID, name string) (organization, error) {
-	row := s.DB.QueryRow(ctx, `
-		WITH created AS (
-			INSERT INTO organizations (owner_id, name) VALUES ($1, $2)
-			RETURNING id, name, verification_status
-		), joined AS (
-			INSERT INTO memberships (user_id, organization_id, role)
-			SELECT $1, id, 'owner' FROM created RETURNING organization_id
-		)
-		SELECT id, name, verification_status FROM created JOIN joined ON organization_id = id
-	`, userID, name)
-	return scanOrganization(row)
+	var created organization
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(
+			hashtextextended('tenantku.identity.organization:' || $1::uuid::text, 0))`, userID); err != nil {
+			return err
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM organizations WHERE owner_id = $1)`, userID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return errOrganizationAlreadyExists
+		}
+		var err error
+		created, err = scanOrganization(tx.QueryRow(ctx, `
+			WITH created AS (
+				INSERT INTO organizations (owner_id, name) VALUES ($1, $2)
+				RETURNING id, name, verification_status
+			), joined AS (
+				INSERT INTO memberships (user_id, organization_id, role)
+				SELECT $1, id, 'owner' FROM created RETURNING organization_id
+			)
+			SELECT id, name, verification_status FROM created JOIN joined ON organization_id = id
+		`, userID, name))
+		return err
+	})
+	return created, err
 }
 
 func (s Store) organization(ctx context.Context, userID, id string) (organization, error) {

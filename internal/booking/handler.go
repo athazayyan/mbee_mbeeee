@@ -79,6 +79,8 @@ func writeHoldError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusConflict, "EVENT_DETAILS_CHANGED", "Acara berubah. Tinjau lagi jadwal, lokasi, dan syarat sebelum membuat hold.", nil)
 	case errors.Is(err, ErrHoldLimit):
 		httpapi.Error(c, http.StatusTooManyRequests, "HOLD_LIMIT_REACHED", "Batas hold aktif tercapai.", nil)
+	case errors.Is(err, ErrActiveParticipation):
+		httpapi.Error(c, http.StatusConflict, "ACTIVE_PARTICIPATION_EXISTS", "Usaha ini masih mengikuti acara lain. Tunggu sampai acara itu selesai atau dibatalkan sebelum ikut acara baru.", nil)
 	case errors.Is(err, ErrHoldUnavailable):
 		httpapi.Error(c, http.StatusServiceUnavailable, "HOLD_UNAVAILABLE", "Layanan hold belum tersedia.", nil)
 	default:

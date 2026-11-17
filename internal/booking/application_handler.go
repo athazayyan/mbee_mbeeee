@@ -126,6 +126,8 @@ func writeApplicationError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusUnprocessableEntity, "VALIDATION_FAILED", "Periksa isi permintaan.", nil)
 	case errors.Is(err, ErrNotCurated):
 		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_CURATED", "Acara ini memakai pemesanan langsung.", nil)
+	case errors.Is(err, ErrActiveParticipation):
+		httpapi.Error(c, http.StatusConflict, "ACTIVE_PARTICIPATION_EXISTS", "Usaha ini masih mengikuti acara lain. Tunggu sampai acara itu selesai atau dibatalkan sebelum ikut acara baru.", nil)
 	case errors.Is(err, ErrApplicationDup):
 		httpapi.Error(c, http.StatusConflict, "APPLICATION_EXISTS", "Usaha ini sudah memiliki pengajuan aktif untuk acara ini.", nil)
 	case errors.Is(err, ErrApplicantBusy):

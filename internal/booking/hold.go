@@ -19,6 +19,8 @@ var (
 	ErrIdempotencyMismatch = errors.New("idempotency key already used with a different payload")
 	ErrNotBookable         = errors.New("event or stand is not bookable")
 	ErrHoldLimit           = errors.New("too many active holds")
+	// ErrActiveParticipation: a business takes part in one event at a time.
+	ErrActiveParticipation = errors.New("business already takes part in another event")
 	ErrStandUnavailable    = errors.New("stand is already allocated")
 	ErrQuotaFull           = errors.New("category quota reached")
 	ErrPolicyChanged       = errors.New("accepted refund policy is no longer active")
@@ -182,6 +184,9 @@ func (s Store) createHold(ctx context.Context, actor, key string, input HoldInpu
 		if active >= settings.MaxActive {
 			return ErrHoldLimit
 		}
+		if err := ensureFreeToJoin(ctx, tx, input.BusinessID, input.EventID); err != nil {
+			return err
+		}
 
 		offer, err := source.ResolveOffer(ctx, tx, OfferRequest{
 			EventID: input.EventID, StandID: input.StandID, SlotID: input.EventSlotID, CategoryID: category, Now: now,
@@ -263,4 +268,23 @@ func insertHold(ctx context.Context, tx pgx.Tx, actor, key string, digest []byte
 	}
 	return scanBooking(tx.QueryRow(ctx, `SELECT `+bookingColumns+` FROM bookings b
 		JOIN allocations a ON a.booking_id = b.id JOIN events e ON e.id = b.event_id WHERE b.id = $1`, id))
+}
+
+// ensureFreeToJoin lets a business take part in one event at a time. A hold or payment still waiting, or a confirmed
+// booking, in another event that has not ended or been cancelled blocks a new one. After that event ends the business
+// can join the next. Bookings are serialized by the caller's per-account lock.
+func ensureFreeToJoin(ctx context.Context, tx pgx.Tx, businessID, eventID string) error {
+	var busy bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM bookings b JOIN events e ON e.id = b.event_id
+		WHERE b.business_id = $1 AND b.event_id <> $2 AND e.ends_at > clock_timestamp()
+		AND e.status IN ('published', 'live')
+		AND (b.status = 'confirmed' OR (b.status IN ('held', 'payment_pending') AND b.expires_at > clock_timestamp())))`,
+		businessID, eventID).Scan(&busy)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return ErrActiveParticipation
+	}
+	return nil
 }

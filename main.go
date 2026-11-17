@@ -21,6 +21,7 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/admin"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/booking"
+	"kitakarsa.com/tenantku/backend/internal/calculator"
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/identity"
@@ -62,6 +63,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "grant-admin" || os.Args[1] == "revoke-admin") {
 		if err := manageAdmin(ctx, os.Args[1] == "grant-admin", os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "seed-demo" {
+		if err := seedDemo(ctx, os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -173,6 +180,7 @@ func run(ctx context.Context) error {
 				return errors.New("MIDTRANS_ENV must be sandbox to enable payments")
 			}
 			payments.Provider = payment.NewMidtrans(key, "sandbox")
+			adminStore.Payments = payments
 		}
 		// E09 needs the payment grants, so it follows the same switch as payments.
 		fundsEnabled := payments.Provider != nil || planRequired
@@ -255,6 +263,7 @@ func run(ctx context.Context) error {
 		bookings.Routes(api, service)
 		products.Routes(api, service, origin)
 		adminStore.Routes(api, service, origin)
+		calculator.Routes(api, origin)
 		reportStore.Routes(api, service, origin)
 		notifications.Routes(api, service, origin)
 		chats.Routes(api, service, origin)
@@ -304,6 +313,7 @@ func run(ctx context.Context) error {
 		booking.Store{}.Routes(api, nil)
 		inventory.Store{}.Routes(api, nil, "")
 		admin.Store{}.Routes(api, nil, "")
+		calculator.Routes(api, "")
 		reports.Store{}.Routes(api, nil, "")
 		notify.Store{}.Routes(api, nil, "")
 		messaging.Store{}.Routes(api, nil, "")

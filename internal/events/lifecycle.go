@@ -79,6 +79,9 @@ func (s Store) duplicateEvent(c *gin.Context, account auth.Account) {
 		if err != nil {
 			return err
 		}
+		if err := ensureNoActiveEvent(ctx, tx, source.OrganizationID); err != nil {
+			return err
+		}
 		source.Name, source.Slug = input.Name, input.Slug
 		created, err = insertEvent(ctx, tx, account.ID, source)
 		return err

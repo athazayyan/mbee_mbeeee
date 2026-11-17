@@ -181,8 +181,14 @@ func TestHoldTransactions(t *testing.T) {
 		VALUES ($1, 1, $2, '{"default_base_price":30000}', now())`, otherEvent, first)
 	other := HoldInput{BusinessID: thirdBusiness, EventID: otherEvent, StandID: testOtherStand,
 		EventSlotID: otherSlot, AcceptedPolicyVersion: "test-policy"}
-	if _, err := s.CreateHold(ctx, third, "different-event", other, settings, offers); err != nil {
-		t.Fatalf("active hold in another event blocked new hold: %v", err)
+	// A business takes part in one event at a time: its active hold here blocks a hold in another event.
+	if _, err := s.CreateHold(ctx, third, "different-event", other, settings, offers); !errors.Is(err, ErrActiveParticipation) {
+		t.Fatalf("hold in a second event while the first is active: %v", err)
+	}
+	// Once the first event has ended the business can join the next.
+	execBookingSQL(t, ctx, s, `UPDATE events SET starts_at = now() - interval '3 days', ends_at = now() - interval '2 days' WHERE id = $1`, event)
+	if _, err := s.CreateHold(ctx, third, "different-event-later", other, settings, offers); err != nil {
+		t.Fatalf("hold in the next event after the first one ended: %v", err)
 	}
 }
 

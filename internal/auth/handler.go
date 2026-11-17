@@ -76,7 +76,8 @@ func readCredentials(c *gin.Context) (credentials, bool) {
 	if !decodeAccountBody(c, &input) {
 		return input, false
 	}
-	return input, validCredentials(c, &input, nil)
+	// Signing in never enforces the length rule for new passwords, so accounts made before it (or by an operator) can still sign in.
+	return input, validCredentials(c, &input, nil, 1)
 }
 
 type registration struct {
@@ -93,7 +94,7 @@ func readRegistration(c *gin.Context) (registration, bool) {
 	if input.Profile != nil {
 		fields = input.Profile.normalize()
 	}
-	return input, validCredentials(c, &input.credentials, fields)
+	return input, validCredentials(c, &input.credentials, fields, minPasswordLength)
 }
 
 func decodeAccountBody(c *gin.Context, into any) bool {
@@ -108,7 +109,9 @@ func decodeAccountBody(c *gin.Context, into any) bool {
 }
 
 // validCredentials normalizes the email and merges any extra field errors into one 422 response.
-func validCredentials(c *gin.Context, input *credentials, fields map[string]string) bool {
+const minPasswordLength = 12
+
+func validCredentials(c *gin.Context, input *credentials, fields map[string]string, minLength int) bool {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 	if fields == nil {
 		fields = make(map[string]string)
@@ -117,7 +120,7 @@ func validCredentials(c *gin.Context, input *credentials, fields map[string]stri
 	if err != nil || address.Address != input.Email || len(input.Email) > 254 {
 		fields["email"] = "Masukkan alamat email yang valid."
 	}
-	if utf8.RuneCountInString(input.Password) < 12 || len(input.Password) > 72 {
+	if utf8.RuneCountInString(input.Password) < minLength || len(input.Password) > 72 {
 		fields["password"] = "Gunakan minimal 12 karakter dan maksimal 72 byte."
 	}
 	if len(fields) != 0 {

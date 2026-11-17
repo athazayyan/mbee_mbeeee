@@ -10,7 +10,7 @@ import (
 )
 
 const eventColumns = `e.id, e.organization_id, e.name, e.slug, e.status, e.starts_at,
-	e.ends_at, e.timezone, e.city, e.address, e.description, e.facilities, e.terms`
+	e.ends_at, e.timezone, e.city, e.address, e.description, e.facilities, e.terms, e.instagram`
 
 var errDraftRequired = errors.New("event must be a draft")
 
@@ -35,6 +35,8 @@ type event struct {
 	Description    *string   `json:"description,omitempty"`
 	Facilities     []string  `json:"facilities"`
 	Terms          *string   `json:"terms,omitempty"`
+	// Instagram is the event's account without the @.
+	Instagram *string `json:"instagram,omitempty"`
 }
 
 func (s Store) Ready(ctx context.Context) error {
@@ -95,18 +97,41 @@ func (s Store) create(ctx context.Context, actor, organization string, input eve
 		if err != nil {
 			return err
 		}
+		if err := ensureNoActiveEvent(ctx, tx, org); err != nil {
+			return err
+		}
 		result, err = insertEvent(ctx, tx, actor, input.apply(event{OrganizationID: org, Facilities: []string{}}))
 		return err
 	})
 	return result, err
 }
 
+var errActiveEventExists = errors.New("organization already has an active event")
+
+// ensureNoActiveEvent allows one active event per organization: a draft, published, or live event that has not
+// ended yet. A new event can be created after the current one ends or is cancelled. Creation is serialized per
+// organization so two requests cannot both pass.
+func ensureNoActiveEvent(ctx context.Context, tx pgx.Tx, organization string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('tenantku.events.active:' || $1::uuid::text, 0))`, organization); err != nil {
+		return err
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM events WHERE organization_id = $1
+		AND status IN ('draft', 'published', 'live') AND ends_at > clock_timestamp())`, organization).Scan(&active); err != nil {
+		return err
+	}
+	if active {
+		return errActiveEventExists
+	}
+	return nil
+}
+
 func insertEvent(ctx context.Context, tx pgx.Tx, actor string, value event) (event, error) {
 	created, err := scanEvent(tx.QueryRow(ctx, `INSERT INTO events AS e
-		(organization_id, created_by, name, slug, starts_at, ends_at, timezone, city, address, description, facilities, terms)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING `+eventColumns,
+		(organization_id, created_by, name, slug, starts_at, ends_at, timezone, city, address, description, facilities, terms, instagram)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING `+eventColumns,
 		value.OrganizationID, actor, value.Name, value.Slug, value.StartsAt, value.EndsAt,
-		value.Timezone, value.City, value.Address, value.Description, value.Facilities, value.Terms))
+		value.Timezone, value.City, value.Address, value.Description, value.Facilities, value.Terms, value.Instagram))
 	if err != nil {
 		return event{}, err
 	}
@@ -143,10 +168,10 @@ func (s Store) update(ctx context.Context, actor, id string, input eventInput) (
 		}
 		result, err = scanEvent(tx.QueryRow(ctx, `UPDATE events AS e SET
 			name = $2, slug = $3, starts_at = $4, ends_at = $5, timezone = $6, city = $7,
-			address = $8, description = $9, facilities = $10, terms = $11, updated_at = clock_timestamp()
+			address = $8, description = $9, facilities = $10, terms = $11, instagram = $12, updated_at = clock_timestamp()
 			WHERE e.id = $1 RETURNING `+eventColumns,
 			id, value.Name, value.Slug, value.StartsAt, value.EndsAt, value.Timezone, value.City,
-			value.Address, value.Description, value.Facilities, value.Terms))
+			value.Address, value.Description, value.Facilities, value.Terms, value.Instagram))
 		if err != nil {
 			return err
 		}
@@ -167,6 +192,6 @@ func scanEvent(row pgx.Row) (event, error) {
 	var value event
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.Name, &value.Slug, &value.Status,
 		&value.StartsAt, &value.EndsAt, &value.Timezone, &value.City, &value.Address,
-		&value.Description, &value.Facilities, &value.Terms)
+		&value.Description, &value.Facilities, &value.Terms, &value.Instagram)
 	return value, err
 }

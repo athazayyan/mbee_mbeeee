@@ -432,7 +432,7 @@ paths:
       x-implementation-status: implemented
       security:
       - AccessCookie: []
-      description: Organisasi baru berstatus unverified dan pembuatnya menjadi pemilik.
+      description: 'Organisasi baru berstatus unverified dan pembuatnya menjadi pemilik. Satu akun hanya boleh memiliki satu profil penyelenggara; yang kedua dijawab 409 ORGANIZATION_ALREADY_EXISTS.'
       requestBody:
         required: true
         content:
@@ -906,7 +906,7 @@ paths:
       tags: [Acara dan katalog]
       operationId: createEvent
       summary: Buat draft acara
-      description: Hanya pemilik organisasi. Satu slot dibuat untuk seluruh durasi acara.
+      description: 'Hanya pemilik organisasi. Satu slot dibuat untuk seluruh durasi acara. Satu organisasi hanya boleh memiliki satu acara aktif (draft, terbit, atau berlangsung yang belum berakhir); yang kedua dijawab 409 ACTIVE_EVENT_EXISTS sampai acara itu selesai atau dibatalkan.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1118,7 +1118,7 @@ paths:
       tags: [Acara dan katalog]
       operationId: duplicateEvent
       summary: Salin acara sebagai draft
-      description: Pemilik organisasi dapat menyalin informasi, jadwal, fasilitas, dan syarat ke draft baru. Slot dibuat ulang. Denah, harga, peserta, booking, dan pembayaran tidak ikut disalin.
+      description: 'Pemilik organisasi dapat menyalin informasi, jadwal, fasilitas, dan syarat ke draft baru. Slot dibuat ulang. Denah, harga, peserta, booking, dan pembayaran tidak ikut disalin. Mengikuti aturan satu acara aktif; 409 ACTIVE_EVENT_EXISTS bila organisasi masih punya acara aktif.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1552,7 +1552,7 @@ paths:
       tags: [Kurasi dan booking]
       operationId: submitApplication
       summary: Ajukan kurasi
-      description: Tenant berhak atas usaha. Hanya untuk acara dengan registration_mode curated. Pengajuan belum mengunci stand atau kuota. Satu pengajuan aktif per usaha dan acara.
+      description: 'Tenant berhak atas usaha. Hanya untuk acara dengan registration_mode curated. Pengajuan belum mengunci stand atau kuota. Satu pengajuan aktif per usaha dan acara. Mengikuti aturan satu acara dalam satu waktu; 409 ACTIVE_PARTICIPATION_EXISTS bila usaha masih mengikuti acara lain.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -1978,7 +1978,7 @@ paths:
       tags: [Kurasi dan booking]
       operationId: createHold
       summary: Buat hold stand
-      description: Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan jika expected_price diisi, seluruh komponen harga diverifikasi ulang. Percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini.
+      description: 'Pemilik usaha meminta hold. Inventori dan kuota dikunci, harga dihitung server, dan jika expected_price diisi, seluruh komponen harga diverifikasi ulang. Percobaan ulang dengan kunci serta isi yang sama mengembalikan status booking terkini. Satu usaha ikut satu acara dalam satu waktu; hold di acara lain saat acara pertama belum selesai dijawab 409 ACTIVE_PARTICIPATION_EXISTS.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -3826,9 +3826,9 @@ paths:
     post:
       tags: [Analisis]
       operationId: calculateBreakEven
-      summary: '[Rencana] Hitung titik impas'
-      description: Publik dengan rate limit. Bila margin tidak positif, hasil target impas bernilai null. Nilai adalah estimasi.
-      x-implementation-status: planned
+      summary: Hitung titik impas
+      description: 'Publik, dibatasi 120 permintaan per menit per alamat. margin = harga - biaya per unit. Unit impas = ceil(biaya tetap / margin), omzet impas = unit x harga, target harian = ceil(unit / hari). Bila margin nol atau negatif, status unreachable dan ketiga target bernilai null. Nilai adalah estimasi dan tidak disimpan.'
+      x-implementation-status: implemented
       security: []
       requestBody:
         required: true
@@ -5772,8 +5772,8 @@ paths:
       tags: [Admin]
       operationId: listAuditEvents
       summary: Baca log audit admin
-      description: Khusus admin platform. Urut dari terbaru. Filter action tersedia; actor_id, from, dan to belum
-        didukung. Filter tidak mengungkap secret.
+      description: Khusus admin platform. Urut dari terbaru. Filter action, resource_type, dan resource_id tersedia; actor_id, from, dan to belum
+        didukung. Izin audit.read. Nilai rahasia (kata sandi, token, nomor rekening) disamarkan sebelum disimpan.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -5786,6 +5786,14 @@ paths:
         in: query
         required: false
         schema: {type: string, minLength: 1}
+      - name: resource_type
+        in: query
+        required: false
+        schema: {type: string, maxLength: 40}
+      - name: resource_id
+        in: query
+        required: false
+        schema: {type: string, format: uuid}
       - name: from
         in: query
         required: false
@@ -5823,20 +5831,129 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /admin/bookings:
+    get:
+      tags: [Admin]
+      operationId: listAdminBookings
+      summary: Cari booking
+      description: Izin payments.read. q mencari ID booking, ID acara, ID usaha, nama acara, atau nama usaha.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [held, payment_pending, confirmed, expired, cancelled]}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminBooking'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payments:
+    get:
+      tags: [Admin]
+      operationId: listAdminPayments
+      summary: Cari pembayaran
+      description: Izin payments.read. q mencari ID pembayaran, ID booking, nama acara, atau nama usaha. Termasuk pembayaran paket acara.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [created, pending, paid, failed, expired]}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminPayment'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/events:
+    get:
+      tags: [Admin]
+      operationId: listAdminEvents
+      summary: Daftar acara
+      description: Izin directory.read. q mencari ID, nama acara, penyelenggara, atau kota.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [draft, published, live, completed, cancelled]}
+      - {$ref: '#/components/parameters/Cursor'}
+      - {$ref: '#/components/parameters/Limit'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminEvent'}}
+                  meta: {$ref: '#/components/schemas/CursorMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /admin/payment-exceptions:
     get:
       tags: [Admin]
       operationId: listPaymentExceptions
-      summary: '[Rencana] Baca pengecualian pembayaran'
-      description: 'Admin berizin. Contoh: pembayaran masuk setelah hold berakhir.'
-      x-implementation-status: planned
+      summary: Antrean pengecualian pembayaran
+      description: 'Izin payments.read. Contoh: pembayaran masuk setelah hold berakhir, nominal tidak cocok, atau ledger tidak sesuai. Tanpa filter status, semua ditampilkan.'
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
+      - name: q
+        in: query
+        required: false
+        schema: {type: string, maxLength: 120}
       - name: status
         in: query
         required: false
-        schema: {type: string, enum: [open, investigating, closed]}
+        schema: {type: string, enum: [open, resolved]}
       - {$ref: '#/components/parameters/Cursor'}
       - {$ref: '#/components/parameters/Limit'}
       responses:
@@ -5850,21 +5967,245 @@ paths:
                 properties:
                   data: {type: array, items: {$ref: '#/components/schemas/PaymentException'}}
                   meta: {$ref: '#/components/schemas/CursorMeta'}
-        '401':
-          description: Sesi pengguna atau tanda tangan provider tidak valid
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payment-exceptions/{id}/resolve:
+    post:
+      tags: [Admin]
+      operationId: resolvePaymentException
+      summary: Tutup pengecualian pembayaran
+      description: Izin payments.manage. Menutup dengan catatan dan mencatat audit. Mengulang pada pengecualian yang sudah ditutup mengembalikan data yang sama tanpa audit baru.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminReason'}
+      responses:
+        '200':
+          description: Berhasil
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ErrorResponse'}
-        '403':
-          description: Akses atau aksi tidak diizinkan
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentException'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payments/{id}/recheck:
+    post:
+      tags: [Admin]
+      operationId: recheckPayment
+      summary: Periksa ulang pembayaran ke provider
+      description: Izin payments.manage. Meminta status asli ke Midtrans dan menerapkannya lewat jalur webhook yang idempoten, sehingga pengulangan tidak membayar atau me-refund dua kali. 503 bila provider belum dikonfigurasi.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminReason'}
+      responses:
+        '200':
+          description: Berhasil
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ErrorResponse'}
-        '422':
-          description: Isi request gagal divalidasi
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminPayment'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payment-methods:
+    get:
+      tags: [Admin]
+      operationId: listAdminPaymentMethods
+      summary: Tarif provider per metode pembayaran
+      description: Izin pricing.manage. Semua metode, termasuk yang dinonaktifkan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminPaymentMethod'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/payment-methods/{code}:
+    put:
+      tags: [Admin]
+      operationId: updateAdminPaymentMethod
+      summary: Ubah tarif metode pembayaran
+      description: Izin pricing.manage. Perubahan hanya berlaku untuk pembayaran yang dibuat setelahnya; pembayaran yang sudah ada tetap memakai biaya dan fee_version saat dibuat. Mengubah fee_flat atau fee_bps wajib disertai fee_version baru. Mengirim nilai yang sama lagi tidak mengubah atau mencatat audit.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: code
+        in: path
+        required: true
+        schema: {type: string, pattern: '^[a-z0-9_]{1,40}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminPaymentMethodInput'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminPaymentMethod'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/plan-prices:
+    get:
+      tags: [Admin]
+      operationId: listAdminPlanPrices
+      summary: Versi harga paket acara
+      description: Izin pricing.manage. Terbaru dulu, termasuk versi yang berlaku di masa depan. current menandai versi yang berlaku sekarang.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/AdminPlanVersion'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      tags: [Admin]
+      operationId: publishAdminPlanPrices
+      summary: Terbitkan versi harga paket
+      description: Izin pricing.manage. effective_at harus di masa depan, jadi pembelian yang sudah terjadi tidak berubah. Daftar yang sama pada waktu yang sama mengembalikan versi yang ada (200); daftar berbeda pada waktu yang sama 409 PRICE_VERSION_CONFLICT.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminPlanVersionInput'}
+      responses:
+        '200':
+          description: Versi yang sama sudah ada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminPlanVersion'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '201':
+          description: Versi dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/AdminPlanVersion'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/ledger/{id}/reverse:
+    post:
+      tags: [Admin]
+      operationId: reverseLedgerTransaction
+      summary: Koreksi ledger dengan pembalikan
+      description: Izin funds.manage. Ledger bersifat append-only, jadi koreksi adalah transaksi baru dengan setiap entri dibalik. Satu transaksi hanya dibalik sekali; mengulang mengembalikan pembalikan yang ada (200) tanpa audit baru. Pembalikan tidak dapat dibalik (409 LEDGER_NOT_REVERSIBLE).
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminReason'}
+      responses:
+        '200':
+          description: Pembalikan sudah ada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/LedgerReversal'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '201':
+          description: Pembalikan dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/LedgerReversal'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /admin/settings/{key}:
     put:
@@ -6122,6 +6463,10 @@ components:
           memberships:
             type: array
             items: {$ref: '#/components/schemas/Membership'}
+          admin_permissions:
+            type: array
+            description: Izin admin platform. Hanya ada untuk akun admin; panel menyembunyikan menu di luar izin ini.
+            items: {type: string, enum: [directory.read, organizations.verify, audit.read, payments.read, payments.manage, funds.manage, pricing.manage, moderation.manage]}
           phone: {type: string, description: Nomor HP dari pendaftaran, bila ada.}
           planned_event_name: {type: string, description: Nama acara pertama yang diisi penyelenggara saat mendaftar.}
           roles:
@@ -6213,6 +6558,7 @@ components:
         banner_upload_id: {type: string, format: uuid}
         facilities: {type: array, items: {type: string, minLength: 1}}
         terms: {type: string, minLength: 1}
+        instagram: {type: string, pattern: '^[A-Za-z0-9._]{1,30}$', description: Akun Instagram acara tanpa @.}
     PublicEvent:
       type: object
       required: [id, organization_id, organization_name, name, slug, status, starts_at, ends_at, timezone, city]
@@ -6231,6 +6577,7 @@ components:
         description: {type: string, minLength: 1}
         facilities: {type: array, items: {type: string, minLength: 1}}
         terms: {type: string, minLength: 1}
+        instagram: {type: string, pattern: '^[A-Za-z0-9._]{1,30}$', description: Akun Instagram acara tanpa @.}
         banner_url: {type: string, format: uri}
         min_rent: {$ref: '#/components/schemas/Rupiah'}
         max_rent: {$ref: '#/components/schemas/Rupiah'}
@@ -6261,6 +6608,7 @@ components:
         description: {type: string, maxLength: 3000}
         facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         terms: {type: string, maxLength: 6000}
+        instagram: {type: string, maxLength: 31, description: Akun Instagram acara. @ di depan dibuang; kosong menghapus. Setelah dibersihkan harus 1–30 huruf, angka, titik, atau garis bawah.}
     EventUpdate:
       type: object
       additionalProperties: false
@@ -6276,6 +6624,7 @@ components:
         description: {type: string, maxLength: 3000}
         facilities: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 120}}
         terms: {type: string, maxLength: 6000}
+        instagram: {type: string, maxLength: 31, description: Akun Instagram acara. @ di depan dibuang; kosong menghapus. Setelah dibersihkan harus 1–30 huruf, angka, titik, atau garis bawah.}
     HistoricalEventInput:
       type: object
       additionalProperties: false
@@ -7257,11 +7606,11 @@ components:
       type: object
       required: [fixed_cost, unit_price, variable_cost_per_unit, estimated_units, selling_days]
       properties:
-        fixed_cost: {$ref: '#/components/schemas/Rupiah'}
-        unit_price: {type: integer, minimum: 1}
-        variable_cost_per_unit: {$ref: '#/components/schemas/Rupiah'}
-        estimated_units: {type: integer, minimum: 0}
-        selling_days: {type: integer, minimum: 1}
+        fixed_cost: {type: integer, minimum: 0, maximum: 1000000000}
+        unit_price: {type: integer, minimum: 1, maximum: 5000000}
+        variable_cost_per_unit: {type: integer, minimum: 0, maximum: 5000000}
+        estimated_units: {type: integer, minimum: 0, maximum: 10000000}
+        selling_days: {type: integer, minimum: 1, maximum: 3650}
     BreakEvenResult:
       type: object
       required: [status, contribution_margin, estimated_profit]
@@ -7752,14 +8101,147 @@ components:
         admin: {type: boolean}
     PaymentException:
       type: object
-      required: [id, payment_id, code, status, created_at]
+      required: [id, kind, status, detail, created_at]
       properties:
         id: {type: string, format: uuid}
-        payment_id: {type: string, format: uuid}
+        kind: {type: string}
+        status: {type: string, enum: [open, resolved]}
+        attempt_id: {type: string, format: uuid}
         booking_id: {type: string, format: uuid}
-        code: {type: string, minLength: 1}
-        status: {type: string, enum: [open, investigating, closed]}
+        detail: {type: object, additionalProperties: true}
         created_at: {type: string, format: date-time}
+        resolved_at: {type: string, format: date-time}
+        resolution_note: {type: string}
+    LedgerReversal:
+      type: object
+      required: [id, reverses, created_at, entries]
+      properties:
+        id: {type: string, format: uuid}
+        reverses: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        entries:
+          type: array
+          items:
+            type: object
+            required: [account, direction, amount]
+            properties:
+              account: {type: string}
+              direction: {type: string, enum: [debit, credit]}
+              amount: {type: integer, minimum: 1}
+    AdminReason:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 500}
+    AdminBooking:
+      type: object
+      required: [id, status, event_id, event_name, business_id, business_name, rent, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [held, payment_pending, confirmed, expired, cancelled]}
+        event_id: {type: string, format: uuid}
+        event_name: {type: string}
+        business_id: {type: string, format: uuid}
+        business_name: {type: string}
+        rent: {type: integer, minimum: 0}
+        created_at: {type: string, format: date-time}
+        payment_status: {type: string, enum: [created, pending, paid, failed, expired]}
+        payment_amount: {type: integer, minimum: 0}
+    AdminPayment:
+      type: object
+      required: [id, kind, status, method, amount, provider_fee, created_at, open_exceptions]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [booking, plan]}
+        status: {type: string, enum: [created, pending, paid, failed, expired]}
+        method: {type: string}
+        amount: {type: integer, minimum: 0}
+        provider_fee: {type: integer, minimum: 0, description: Biaya admin metode yang dibebankan pada pembayaran ini.}
+        fee_version: {type: string}
+        booking_id: {type: string, format: uuid}
+        event_name: {type: string}
+        business_name: {type: string}
+        created_at: {type: string, format: date-time}
+        paid_at: {type: string, format: date-time}
+        open_exceptions: {type: integer, minimum: 0}
+    AdminEvent:
+      type: object
+      required: [id, name, status, city, organization_name, starts_at, created_at, bookings]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        status: {type: string, enum: [draft, published, live, completed, cancelled]}
+        city: {type: string}
+        organization_name: {type: string}
+        starts_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        bookings: {type: integer, minimum: 0}
+    AdminPaymentMethod:
+      type: object
+      required: [code, label, enabled, fee_flat, fee_bps, fee_source, fee_version, refund_mode, updated_at]
+      properties:
+        code: {type: string}
+        label: {type: string}
+        enabled: {type: boolean}
+        fee_flat: {type: integer, minimum: 0, maximum: 1000000}
+        fee_bps: {type: integer, minimum: 0, maximum: 2000}
+        fee_source: {type: string, enum: [estimate, contract]}
+        fee_version: {type: string}
+        refund_mode: {type: string, enum: [api, manual]}
+        updated_at: {type: string, format: date-time}
+    AdminPaymentMethodInput:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        enabled: {type: boolean}
+        fee_flat: {type: integer, minimum: 0, maximum: 1000000}
+        fee_bps: {type: integer, minimum: 0, maximum: 2000}
+        fee_source: {type: string, enum: [estimate, contract]}
+        fee_version: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$'}
+        refund_mode: {type: string, enum: [api, manual]}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    AdminPlan:
+      type: object
+      required: [code, name, capacity, price, price_per_tenant]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        capacity: {type: integer, minimum: 1}
+        price: {type: integer, minimum: 0}
+        price_per_tenant: {type: integer, minimum: 0}
+    AdminPlanVersion:
+      type: object
+      required: [id, effective_at, custom_price_per_tenant, created_at, current, plans]
+      properties:
+        id: {type: integer}
+        effective_at: {type: string, format: date-time}
+        custom_price_per_tenant: {type: integer, minimum: 0}
+        created_at: {type: string, format: date-time}
+        current: {type: boolean}
+        plans: {type: array, items: {$ref: '#/components/schemas/AdminPlan'}}
+    AdminPlanVersionInput:
+      type: object
+      additionalProperties: false
+      required: [effective_at, custom_price_per_tenant, plans, reason]
+      properties:
+        effective_at: {type: string, format: date-time}
+        custom_price_per_tenant: {type: integer, minimum: 0}
+        plans:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, name, capacity, price]
+            properties:
+              code: {type: string, pattern: '^[a-z]{2,20}$'}
+              name: {type: string, minLength: 1, maxLength: 40}
+              capacity: {type: integer, minimum: 1, maximum: 100000}
+              price: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 500}
     SettingInput:
       type: object
       required: [value, effective_at, reason]
