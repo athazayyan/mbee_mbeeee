@@ -32,6 +32,12 @@ func (transport snapTransport) RoundTrip(req *http.Request) (*http.Response, err
 
 func migratedStore(t *testing.T, ctx context.Context) Store {
 	t.Helper()
+	return storeWithMigrations(t, ctx, func(string) bool { return true })
+}
+
+// storeWithMigrations applies the migrations accepted by include to a fresh schema.
+func storeWithMigrations(t *testing.T, ctx context.Context, include func(name string) bool) Store {
+	t.Helper()
 	databaseURL := os.Getenv("TENANTKU_TEST_DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("set TENANTKU_TEST_DATABASE_URL to run the PostgreSQL payment test")
@@ -65,7 +71,7 @@ func migratedStore(t *testing.T, ctx context.Context) Store {
 		t.Fatal(err)
 	}
 	for _, f := range files {
-		if !strings.HasSuffix(f.Name(), ".up.sql") {
+		if !strings.HasSuffix(f.Name(), ".up.sql") || !include(f.Name()) {
 			continue
 		}
 		// This deployment function is bound to public, while the fixture uses its own schema.
@@ -163,24 +169,24 @@ func TestPaymentLifecycle(t *testing.T) {
 	booking := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000001")
 
 	// Another account cannot pay for this booking.
-	if _, _, err := s.CreateAttempt(ctx, other, "q@example.com", booking, "k0", Input{Method: "snap"}); !errors.Is(err, pgx.ErrNoRows) {
+	if _, _, err := s.CreateAttempt(ctx, other, "q@example.com", booking, "k0", Input{Method: "bank_transfer"}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-account payment: %v", err)
 	}
-	attempt, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap"})
-	if err != nil || !created || attempt.Amount != 31500 || attempt.Status != "pending" || attempt.CheckoutURL == "" {
+	attempt, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer"})
+	if err != nil || !created || attempt.Amount != 35000 || attempt.Status != "pending" || attempt.CheckoutURL == "" {
 		t.Fatalf("attempt %+v created=%v err=%v", attempt, created, err)
 	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, booking); got != "payment_pending" {
 		t.Fatalf("booking status %s", got)
 	}
-	replay, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap"})
+	replay, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer"})
 	if err != nil || created || replay.ID != attempt.ID {
 		t.Fatalf("replay %+v created=%v err=%v", replay, created, err)
 	}
-	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "snap", Description: "x"}); !errors.Is(err, ErrIdempotencyMismatch) {
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k1", Input{Method: "bank_transfer", Description: "x"}); !errors.Is(err, ErrIdempotencyMismatch) {
 		t.Fatalf("mismatch: %v", err)
 	}
-	again, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k2", Input{Method: "snap"})
+	again, created, err := s.CreateAttempt(ctx, user, "p@example.com", booking, "k2", Input{Method: "bank_transfer"})
 	if err != nil || created || again.ID != attempt.ID {
 		t.Fatalf("second key should reuse the live attempt: %+v %v", again, err)
 	}
@@ -198,13 +204,13 @@ func TestPaymentLifecycle(t *testing.T) {
 	}
 
 	// Settlement confirms once, even if delivered repeatedly or followed by a stale pending event.
-	n, raw = notify(attempt.ID, "settlement", "200", "31500.00")
+	n, raw = notify(attempt.ID, "settlement", "200", "35000.00")
 	for range 3 {
 		if err := s.ApplyNotification(ctx, n, raw); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stale, staleRaw := notify(attempt.ID, "pending", "201", "31500.00")
+	stale, staleRaw := notify(attempt.ID, "pending", "201", "35000.00")
 	if err := s.ApplyNotification(ctx, stale, staleRaw); err != nil {
 		t.Fatal(err)
 	}
@@ -231,14 +237,14 @@ func TestPaymentLifecycle(t *testing.T) {
 
 	// Payment arriving after the hold expired is an exception, never a silent confirmation.
 	expired := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000002")
-	late, _, err := s.CreateAttempt(ctx, user, "p@example.com", expired, "k3", Input{Method: "snap"})
+	late, _, err := s.CreateAttempt(ctx, user, "p@example.com", expired, "k3", Input{Method: "bank_transfer"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.DB.Exec(ctx, `UPDATE bookings SET expires_at = now() - interval '1 minute' WHERE id = $1`, expired); err != nil {
 		t.Fatal(err)
 	}
-	n, raw = notify(late.ID, "settlement", "200", "31500.00")
+	n, raw = notify(late.ID, "settlement", "200", "35000.00")
 	expiryWorker := bookingstore.Store{DB: s.DB}
 	expiry := make(chan error, 1)
 	go func() {
@@ -262,18 +268,18 @@ func TestPaymentLifecycle(t *testing.T) {
 
 	// A failed attempt returns the booking to held so the tenant can retry.
 	retry := seedBooking(t, ctx, s, user, business, category, event, slot, "00000000-0000-4000-8000-000000000003")
-	failing, _, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k4", Input{Method: "snap"})
+	failing, _, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k4", Input{Method: "bank_transfer"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, raw = notify(failing.ID, "expire", "407", "31500.00")
+	n, raw = notify(failing.ID, "expire", "407", "35000.00")
 	if err := s.ApplyNotification(ctx, n, raw); err != nil {
 		t.Fatal(err)
 	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, retry); got != "held" {
 		t.Fatalf("booking after failed attempt: %s", got)
 	}
-	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "snap"})
+	next, created, err := s.CreateAttempt(ctx, user, "p@example.com", retry, "k5", Input{Method: "bank_transfer"})
 	if err != nil || !created || next.ID == failing.ID {
 		t.Fatalf("retry attempt %+v %v", next, err)
 	}
@@ -294,11 +300,11 @@ func TestPaymentLifecycle(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusCreated,
 			Body: io.NopCloser(strings.NewReader(`{"token":"recovered","redirect_url":"https://pay.example/recovered"}`))}, nil
 	})}
-	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"}); !errors.Is(err, ErrProvider) {
+	if _, _, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "bank_transfer"}); !errors.Is(err, ErrProvider) {
 		t.Fatalf("expected provider timeout, got %v", err)
 	}
 	reserved := one(t, ctx, s, `SELECT id FROM payment_attempts WHERE booking_id = $1 AND status = 'created'`, timeout)
-	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "snap"})
+	recovered, created, err := s.CreateAttempt(ctx, user, "p@example.com", timeout, "k6", Input{Method: "bank_transfer"})
 	if err != nil || created || recovered.ID != reserved || recovered.Status != "pending" || recovered.CheckoutURL == "" {
 		t.Fatalf("timeout recovery %+v created=%v err=%v", recovered, created, err)
 	}

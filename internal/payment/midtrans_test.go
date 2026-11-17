@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -95,12 +97,100 @@ func TestCreateSnap(t *testing.T) {
 	defer srv.Close()
 	m := NewMidtrans("Mid-server-test", "sandbox")
 	m.SnapURL = srv.URL
-	res, err := m.CreateSnap(context.Background(), "o-1", 1000, "a@b.c", nil, 90*time.Second)
+	res, err := m.CreateSnap(context.Background(), SnapInput{OrderID: "o-1", Amount: 1000, Email: "a@b.c", Expiry: 90 * time.Second})
 	if err != nil || res.Token != "tok" {
 		t.Fatalf("%v %+v", err, res)
 	}
 	m.ServerKey = "wrong"
-	if _, err := m.CreateSnap(context.Background(), "o-1", 1000, "", nil, time.Minute); err == nil {
+	if _, err := m.CreateSnap(context.Background(), SnapInput{OrderID: "o-1", Amount: 1000, Expiry: time.Minute}); err == nil {
+		t.Fatal("expected provider error")
+	}
+}
+
+func TestExpire(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		want ExpireResult
+		err  bool
+	}{
+		"closed":       {`{"status_code":"200","transaction_status":"expire"}`, Expired, false},
+		"sandbox 407":  {`{"status_code":"407","status_message":"Success, transaction is expired","transaction_status":"expire"}`, Expired, false},
+		"not created":  {`{"status_code":"404","status_message":"Transaction doesn't exist."}`, Absent, false},
+		"settled":      {`{"status_code":"412","status_message":"Transaction status cannot be updated."}`, Refused, false},
+		"unexpected":   {`{"status_code":"500"}`, Refused, true},
+		"unreadable":   {`<html>`, Refused, true},
+		"wrong status": {`{"status_code":"200","transaction_status":"settlement"}`, Refused, true},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/order-1/expire" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		m := NewMidtrans(testKey, "sandbox")
+		m.StatusURL = srv.URL
+		got, err := m.Expire(context.Background(), "order-1")
+		srv.Close()
+		if got != tc.want || (err != nil) != tc.err {
+			t.Errorf("%s: got %v %v", name, got, err)
+		}
+	}
+}
+
+func TestCreateSnapSendsChannelsAndFinishURL(t *testing.T) {
+	var got snapRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"token":"t","redirect_url":"https://pay.example/t"}`))
+	}))
+	defer srv.Close()
+	m := NewMidtrans(testKey, "sandbox")
+	m.SnapURL = srv.URL
+	_, err := m.CreateSnap(context.Background(), SnapInput{
+		OrderID: "o", Amount: 5, Expiry: time.Minute, Channels: []string{"gopay"}, FinishURL: "https://app.example.com/done",
+	})
+	if err != nil || len(got.EnabledPayments) != 1 || got.EnabledPayments[0] != "gopay" ||
+		got.Callbacks == nil || got.Callbacks.Finish != "https://app.example.com/done" {
+		t.Fatalf("%v %+v", err, got)
+	}
+	// Without a finish URL no callbacks object is sent.
+	got = snapRequest{}
+	if _, err := m.CreateSnap(context.Background(), SnapInput{OrderID: "o", Amount: 5, Expiry: time.Minute}); err != nil || got.Callbacks != nil {
+		t.Fatalf("%v %+v", err, got)
+	}
+}
+
+func TestProviderMessage(t *testing.T) {
+	if got := providerMessage([]byte(`{"error_messages":["Payment channel is not activated.","x"]}`)); got != "Payment channel is not activated.; x" {
+		t.Fatal(got)
+	}
+	if providerMessage([]byte(`not json`)) == "" {
+		t.Fatal("unreadable body should still explain itself")
+	}
+}
+
+func TestEnabledChannels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, _, ok := r.BasicAuth(); !ok || user != "Mid-client-test" || r.URL.Path != "/tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"enabled_payments":["gopay",{"type":"bca_va"},"other_qris"]}`))
+	}))
+	defer srv.Close()
+	m := NewMidtrans(testKey, "sandbox")
+	m.SnapURL = srv.URL
+	if _, err := m.EnabledChannels(context.Background(), "tok"); err == nil {
+		t.Fatal("a missing client key must be reported, not silently pass")
+	}
+	m.ClientKey = "Mid-client-test"
+	got, err := m.EnabledChannels(context.Background(), "tok")
+	if err != nil || strings.Join(got, ",") != "gopay,bca_va,other_qris" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := m.EnabledChannels(context.Background(), "other"); err == nil {
 		t.Fatal("expected provider error")
 	}
 }

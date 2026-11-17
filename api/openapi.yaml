@@ -2215,7 +2215,7 @@ paths:
       tags: [Pembayaran dan operasional dana]
       operationId: createBookingPayment
       summary: 'Buat payment attempt booking (Midtrans Snap)'
-      description: Sandbox. Tenant pemesan. Nominal dari snapshot. Status paid hanya setelah verifikasi provider.
+      description: 'Sandbox. Tenant pemesan memilih metode dari GET /bookings/{id}/payment-options. Nominal dihitung server: sewa + biaya platform dari snapshot booking + biaya admin metode. Halaman bayar Midtrans dibatasi ke metode itu. Memilih metode lain saat ada attempt aktif menutup attempt lama di Midtrans lalu membuat attempt baru dengan total baru; bila attempt lama masih diproses server menjawab 409 PAYMENT_IN_PROGRESS. Status paid hanya setelah verifikasi provider.'
       x-implementation-status: implemented
       security:
       - AccessCookie: []
@@ -2286,6 +2286,35 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/payment-options:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: getBookingPaymentOptions
+      summary: Pilihan metode bayar dan total per metode
+      description: Tenant pemesan. Menampilkan sewa, biaya platform, biaya admin dan total tiap metode yang dirilis, serta attempt terakhir agar pembayar yang kembali dari Midtrans melihat statusnya. Biaya admin ditanggung tenant (PROD-03). Biaya provider tetap pada snapshot booking tidak dipakai lagi; biaya admin metode menggantikannya.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Pilihan pembayaran
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/PaymentOptions'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
   /plans:
     get:
@@ -5089,11 +5118,39 @@ components:
       type: object
       required: [method]
       properties:
-        method: {type: string, minLength: 1}
+        method: {type: string, pattern: '^[a-z0-9_]{1,40}$', description: Kode dari payment-options, misalnya bank_transfer, qris, atau gopay.}
         description: {type: string, maxLength: 200}
+    PaymentMethodOption:
+      type: object
+      required: [code, label, fee, total, fee_source, refund_mode]
+      properties:
+        code: {type: string}
+        label: {type: string}
+        description: {type: string}
+        fee: {$ref: '#/components/schemas/Rupiah'}
+        total: {$ref: '#/components/schemas/Rupiah'}
+        fee_source: {type: string, enum: [estimate, contract], description: Estimate berarti tarif daftar Midtrans yang belum dikonfirmasi dengan kontrak merchant.}
+        refund_mode: {type: string, enum: [api, manual]}
+    PaymentOptions:
+      type: object
+      required: [booking_id, status, expires_at, rent, platform_fee, subtotal, fee_bearer, payable, methods, attempt]
+      properties:
+        booking_id: {type: string, format: uuid}
+        status: {type: string, enum: [held, payment_pending, confirmed, expired, cancelled]}
+        expires_at: {type: string, format: date-time}
+        rent: {$ref: '#/components/schemas/Rupiah'}
+        platform_fee: {$ref: '#/components/schemas/Rupiah'}
+        subtotal: {$ref: '#/components/schemas/Rupiah'}
+        fee_bearer: {type: string, enum: [tenant]}
+        payable: {type: boolean, description: False bila hold habis, acara tidak menerima pemesanan, atau pembayaran belum tersedia.}
+        methods: {type: array, items: {$ref: '#/components/schemas/PaymentMethodOption'}}
+        attempt:
+          oneOf:
+          - {$ref: '#/components/schemas/PaymentAttempt'}
+          - {type: 'null'}
     PaymentAttempt:
       type: object
-      required: [id, status, amount, currency, provider]
+      required: [id, status, amount, currency, provider, method, method_fee]
       properties:
         id: {type: string, format: uuid}
         status: {type: string, enum: [created, pending, paid, failed, expired]}
@@ -5102,6 +5159,8 @@ components:
         provider: {type: string, minLength: 1}
         checkout_url: {type: string, format: uri}
         expires_at: {type: string, format: date-time}
+        method: {type: string, description: Kode metode yang dipilih. Paket acara memakai snap.}
+        method_fee: {$ref: '#/components/schemas/Rupiah'}
         funds_status: {type: string, enum: [held, release_pending, released, frozen]}
     Plan:
       type: object

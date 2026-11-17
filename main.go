@@ -46,6 +46,12 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "payments" {
+		if err := runPayments(ctx, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "hold-policy" {
 		if err := installHoldPolicy(ctx, os.Args[2:]); err != nil {
 			log.Fatal(err)
