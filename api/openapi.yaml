@@ -4125,9 +4125,10 @@ paths:
     get:
       tags: ['Pesan, ulasan, dan notifikasi']
       operationId: listNotifications
-      summary: '[Rencana] Baca inbox notifikasi'
-      description: Hanya notifikasi pemilik sesi.
-      x-implementation-status: planned
+      summary: Baca inbox notifikasi
+      description: Hanya notifikasi pemilik sesi, terbaru dulu. meta.unread_count menghitung seluruh notifikasi belum
+        dibaca, tidak hanya halaman ini. Notifikasi dibuat worker dari outbox peristiwa booking dengan dedupe per penerima.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4147,7 +4148,12 @@ paths:
                 required: [data, meta]
                 properties:
                   data: {type: array, items: {$ref: '#/components/schemas/Notification'}}
-                  meta: {$ref: '#/components/schemas/CursorMeta'}
+                  meta:
+                    type: object
+                    required: [next_cursor, unread_count]
+                    properties:
+                      next_cursor: {type: [string, 'null']}
+                      unread_count: {type: integer, minimum: 0}
         '401':
           description: Sesi pengguna atau tanda tangan provider tidak valid
           content:
@@ -4160,6 +4166,92 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '422':
           description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /notifications/unread-count:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: countUnreadNotifications
+      summary: Hitung notifikasi belum dibaca
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [unread_count]
+                    properties:
+                      unread_count: {type: integer, minimum: 0}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /notifications/{id}/read:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: markNotificationRead
+      summary: Tandai notifikasi dibaca
+      description: Idempoten. Waktu baca pertama dipertahankan.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Berhasil tanpa isi respons
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /notifications/read-all:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: markAllNotificationsRead
+      summary: Tandai semua notifikasi dibaca
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [updated]
+                    properties:
+                      updated: {type: integer, minimum: 0}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5931,12 +6023,13 @@ components:
         comment: {type: string, maxLength: 2000}
     Notification:
       type: object
-      required: [id, kind, title, created_at]
+      required: [id, kind, title, message, created_at]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, minLength: 1}
+        kind: {type: string, enum: [event_cancelled, booking_expired]}
         title: {type: string, minLength: 1}
         message: {type: string, minLength: 1}
+        link: {type: string, description: Path internal aplikasi yang membuka detail terkait.}
         created_at: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
     PresignInput:
