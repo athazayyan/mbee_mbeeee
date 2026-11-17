@@ -122,6 +122,7 @@ GRANT SELECT ON public.event_plans, public.event_plan_purchases TO :"api_role";
 GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
     UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
+GRANT EXECUTE ON FUNCTION public.cancel_event_bookings(uuid, uuid) TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";

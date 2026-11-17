@@ -139,7 +139,7 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 		}
 		if hasBookings {
 			var closed bool
-			if err := tx.QueryRow(ctx, `SELECT public.cancel_unpaid_event_bookings($1, $2)`, id, actor).Scan(&closed); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT public.cancel_event_bookings($1, $2)`, id, actor).Scan(&closed); err != nil {
 				return err
 			}
 			if !closed {
