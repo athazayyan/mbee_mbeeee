@@ -95,6 +95,8 @@ Migration mengisi tarif paket Mini hingga Large dan tarif dasar Custom. Custom m
 
 Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
 
+Untuk memproses instruksi refund pembatalan di sandbox, pasang konfigurasi Midtrans yang sama pada worker dan set `EVENT_REFUND_SANDBOX_ENABLED=true`. Worker mengirim refund parsial QRIS dengan referensi yang stabil, lalu menunggu konfirmasi bank dari hasil pengecekan provider sebelum mencatat jurnal. Metode seperti VA masuk status `manual_review` untuk tindak lanjut operasional.
+
 ## Verifikasi lokal
 
 | Endpoint | Hasil yang diharapkan |

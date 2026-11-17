@@ -38,6 +38,11 @@ GRANT USAGE ON SCHEMA public TO :"api_role", :"worker_role";
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"api_role", :"worker_role";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
 -- Table-level revokes do not remove column grants from a previous deployment.
+REVOKE SELECT (id, amount) ON public.payment_attempts FROM :"worker_role";
+REVOKE UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds FROM :"worker_role";
+REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"worker_role";
+REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries FROM :"worker_role";
 REVOKE SELECT (created_by, category_id, idempotency_key, request_digest), UPDATE (status),
     INSERT (business_id, event_id, category_id, created_by, status, expires_at, price_revision,
         rent, platform_fee, provider_fee, terms_snapshot, refund_policy_version,
@@ -157,6 +162,12 @@ GRANT SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payme
 GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"api_role";
 GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"api_role";
+GRANT SELECT (id, amount) ON public.payment_attempts TO :"worker_role";
+GRANT SELECT ON public.event_cancellation_refunds TO :"worker_role";
+GRANT UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds TO :"worker_role";
+GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"worker_role";
+GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
+    ON public.ledger_entries TO :"worker_role";
 \endif
 
 GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.bookings TO :"worker_role";

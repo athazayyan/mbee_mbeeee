@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"kitakarsa.com/tenantku/backend/internal/booking"
+	"kitakarsa.com/tenantku/backend/internal/payment"
 )
 
 const (
@@ -80,6 +81,28 @@ func runWorker(ctx context.Context, args []string) error {
 		return fmt.Errorf("worker readiness check failed (%s); verify the database connection and run migrations", expiryErrorCode(err))
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("component", "booking_expiry")
+	var refunds payment.Store
+	if os.Getenv("EVENT_REFUND_SANDBOX_ENABLED") == "true" {
+		if os.Getenv("MIDTRANS_ENV") != "sandbox" || os.Getenv("MIDTRANS_SERVER_KEY") == "" {
+			return errors.New("sandbox refunds require MIDTRANS_ENV=sandbox and MIDTRANS_SERVER_KEY")
+		}
+		refunds = payment.Store{DB: pool, Provider: payment.NewMidtrans(os.Getenv("MIDTRANS_SERVER_KEY"), "sandbox")}
+	}
+	runBatch := func() error {
+		if err := expireBatch(ctx, store, logger); err != nil {
+			return err
+		}
+		if refunds.Provider == nil {
+			return nil
+		}
+		probe, stop := context.WithTimeout(ctx, expiryTimeout)
+		defer stop()
+		err := refunds.ProcessCancellationRefund(probe)
+		if err != nil {
+			logger.Error("event refund processing failed", "error_code", expiryErrorCode(err))
+		}
+		return err
+	}
 	var readiness expiryReadiness
 	var listenerErrors <-chan error
 	if address := os.Getenv("WORKER_HEALTH_ADDR"); !once && address != "" {
@@ -98,7 +121,7 @@ func runWorker(ctx context.Context, args []string) error {
 	}
 	logger.Info("worker started", "interval", expiryInterval.String(), "once", once)
 	if once {
-		return expireBatch(ctx, store, logger)
+		return runBatch()
 	}
 
 	timer := time.NewTimer(0)
@@ -112,7 +135,7 @@ func runWorker(ctx context.Context, args []string) error {
 			return fmt.Errorf("worker readiness server: %w", err)
 		case <-timer.C:
 			// A failure is logged with its job ID and retried on the next cycle.
-			err := expireBatch(ctx, store, logger)
+			err := runBatch()
 			if ctx.Err() == nil {
 				readiness.record(err, time.Now())
 			}
