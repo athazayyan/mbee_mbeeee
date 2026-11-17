@@ -99,8 +99,22 @@ type layoutRevision struct {
 // publicStand adds what visitors need: availability and the price from the active pricing rules.
 type publicStand struct {
 	layoutStand
-	Status    string `json:"status"`
-	BasePrice *int64 `json:"base_price,omitempty"`
+	Status    string         `json:"status"`
+	BasePrice *int64         `json:"base_price,omitempty"`
+	Occupant  *standOccupant `json:"occupant,omitempty"`
+}
+
+// standOccupant is the public face of the business on a confirmed stand: who sells there and what.
+type standOccupant struct {
+	BusinessName string            `json:"business_name"`
+	Category     string            `json:"category"`
+	Products     []occupantProduct `json:"products"`
+}
+
+type occupantProduct struct {
+	Name          string  `json:"name"`
+	Price         int64   `json:"price"`
+	PhotoUploadID *string `json:"photo_upload_id,omitempty"`
 }
 
 type publicLayout struct {
@@ -528,6 +542,10 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		if err != nil {
 			return err
 		}
+		occupied, err := standOccupants(ctx, tx, eventID, slotID)
+		if err != nil {
+			return err
+		}
 		result = publicLayout{
 			EventID: layout.EventID, EventName: name, Revision: layout.Revision, Width: layout.Width, Height: layout.Height,
 			CellMeters: layout.CellMeters, Blocks: layout.Blocks, Areas: layout.Areas,
@@ -542,6 +560,7 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 			switch {
 			case confirmed:
 				value.Status = "booked"
+				value.Occupant = occupied[stand.ID]
 			case result.SlotID == nil || !stand.Active || allocated:
 				value.Status = "unavailable"
 			}
@@ -550,6 +569,59 @@ func (s Store) publicLayoutFor(ctx context.Context, eventID string) (publicLayou
 		return nil
 	})
 	return result, err
+}
+
+// standOccupants returns the business on each confirmed stand of the slot with up to six active products.
+// Only confirmed bookings are shown; holds and pending payments stay anonymous.
+func standOccupants(ctx context.Context, tx pgx.Tx, eventID, slotID string) (map[string]*standOccupant, error) {
+	rows, err := tx.Query(ctx, `SELECT a.stand_id::text, bz.id::text, bz.name, bc.name FROM allocations a
+		JOIN bookings b ON b.id = a.booking_id
+		JOIN businesses bz ON bz.id = b.business_id
+		JOIN business_categories bc ON bc.id = bz.category_id
+		WHERE a.event_id = $1 AND a.event_slot_id = $2 AND a.status = 'reserved' AND b.status = 'confirmed'`, eventID, slotID)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]*standOccupant)
+	byBusiness := make(map[string][]*standOccupant)
+	for rows.Next() {
+		var standID, businessID string
+		value := &standOccupant{Products: []occupantProduct{}}
+		if err := rows.Scan(&standID, &businessID, &value.BusinessName, &value.Category); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		result[standID] = value
+		byBusiness[businessID] = append(byBusiness[businessID], value)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(byBusiness) == 0 {
+		return result, err
+	}
+	ids := make([]string, 0, len(byBusiness))
+	for id := range byBusiness {
+		ids = append(ids, id)
+	}
+	rows, err = tx.Query(ctx, `SELECT business_id::text, name, price, photo_upload_id::text FROM (
+		SELECT business_id, name, price, photo_upload_id,
+			row_number() OVER (PARTITION BY business_id ORDER BY photo_upload_id IS NULL, created_at, id) AS rank
+		FROM products WHERE business_id = ANY($1::uuid[]) AND archived_at IS NULL) ranked
+		WHERE rank <= 6 ORDER BY business_id, rank`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var businessID string
+		var product occupantProduct
+		if err := rows.Scan(&businessID, &product.Name, &product.Price, &product.PhotoUploadID); err != nil {
+			return nil, err
+		}
+		for _, occupant := range byBusiness[businessID] {
+			occupant.Products = append(occupant.Products, product)
+		}
+	}
+	return result, rows.Err()
 }
 
 func publicLayoutSlot(ctx context.Context, tx pgx.Tx, eventID string, at time.Time) (string, time.Time, error) {
