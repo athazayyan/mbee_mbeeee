@@ -4065,6 +4065,34 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /reports/{id}/pdf:
+    get:
+      tags: [Rapor usaha]
+      operationId: downloadReportPdf
+      summary: Unduh rapor sebagai PDF
+      description: Pemilik usaha. PDF dibuat dari snapshot tersimpan sehingga isinya selalu sama, lengkap dengan sumber,
+        kelengkapan, label belum diverifikasi, dan kode verifikasi.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Berkas PDF
+          content:
+            application/pdf: {schema: {type: string, format: binary}}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /reports/{id}:
     get:
       tags: [Rapor usaha]

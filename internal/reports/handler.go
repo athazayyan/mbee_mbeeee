@@ -29,6 +29,7 @@ func (fieldErrors) Error() string { return "report validation failed" }
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
 	api.GET("/businesses/:id/reports", sessions.WithAccount(s.listReports))
 	api.GET("/reports/:id", sessions.WithAccount(s.getReport))
+	api.GET("/reports/:id/pdf", sessions.WithAccount(s.getPDF))
 	api.GET("/jobs/:id", sessions.WithAccount(s.getJob))
 	api.GET("/reports/:id/shares", sessions.WithAccount(s.listShares))
 	api.GET("/public/reports/:token", s.getPublic)
@@ -163,6 +164,30 @@ func (s Store) getReport(c *gin.Context, account auth.Account) {
 	}
 	c.Header("Cache-Control", "no-store")
 	httpapi.Success(c, http.StatusOK, report)
+}
+
+// getPDF mengunduh rapor lengkap sebagai PDF untuk pemilik usaha.
+func (s Store) getPDF(c *gin.Context, account auth.Account) {
+	id := c.Param("id")
+	if !validID(c, id) {
+		return
+	}
+	report, err := s.get(c.Request.Context(), account.ID, strings.ToLower(id))
+	if err == nil && report.Snapshot == nil {
+		err = errNotFound
+	}
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	body, err := renderPDF(*report.Snapshot, report.VerificationCode)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Content-Disposition", `attachment; filename="rapor-`+report.VerificationCode+`.pdf"`)
+	c.Data(http.StatusOK, "application/pdf", body)
 }
 
 func (s Store) postShare(c *gin.Context, account auth.Account, origin string) {
