@@ -38,7 +38,12 @@ GRANT USAGE ON SCHEMA public TO :"api_role", :"worker_role";
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"api_role", :"worker_role";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
 -- Table-level revokes do not remove column grants from a previous deployment.
-REVOKE SELECT (id, amount) ON public.payment_attempts FROM :"worker_role";
+REVOKE SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount),
+    UPDATE (cancellation_checked_at, status, paid_at, updated_at) ON public.payment_attempts FROM :"worker_role";
+REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events FROM :"worker_role";
+REVOKE INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions FROM :"worker_role";
+REVOKE SELECT (rent, platform_fee, provider_fee) ON public.bookings FROM :"worker_role";
 REVOKE UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds FROM :"worker_role";
 REVOKE SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions FROM :"worker_role";
 REVOKE SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
@@ -162,7 +167,12 @@ GRANT SELECT (id), INSERT (attempt_id, booking_id, kind, detail) ON public.payme
 GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"api_role";
 GRANT SELECT (transaction_id, direction, amount), INSERT (transaction_id, account, direction, amount)
     ON public.ledger_entries TO :"api_role";
-GRANT SELECT (id, amount) ON public.payment_attempts TO :"worker_role";
+GRANT SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount),
+    UPDATE (cancellation_checked_at, status, paid_at, updated_at) ON public.payment_attempts TO :"worker_role";
+GRANT SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
+    UPDATE (outcome, attempt_id) ON public.payment_events TO :"worker_role";
+GRANT INSERT (attempt_id, booking_id, kind, detail) ON public.payment_exceptions TO :"worker_role";
+GRANT SELECT (rent, platform_fee, provider_fee) ON public.bookings TO :"worker_role";
 GRANT SELECT ON public.event_cancellation_refunds TO :"worker_role";
 GRANT UPDATE (status, next_check_at, confirmed_at) ON public.event_cancellation_refunds TO :"worker_role";
 GRANT SELECT (id), INSERT (kind, ref_type, ref_id) ON public.ledger_transactions TO :"worker_role";

@@ -101,7 +101,13 @@ func runWorker(ctx context.Context, args []string) error {
 		if err != nil {
 			logger.Error("event refund processing failed", "error_code", expiryErrorCode(err))
 		}
-		return err
+		reconcile, finish := context.WithTimeout(ctx, expiryTimeout)
+		defer finish()
+		reconciliationErr := refunds.ReconcileCancelledPayment(reconcile)
+		if reconciliationErr != nil {
+			logger.Error("cancelled booking payment reconciliation failed", "error_code", expiryErrorCode(reconciliationErr))
+		}
+		return errors.Join(err, reconciliationErr)
 	}
 	var readiness expiryReadiness
 	var listenerErrors <-chan error
