@@ -42,14 +42,44 @@ type accountProfile struct {
 	// Phone and PlannedEventName come from the registration form and are absent for older accounts.
 	Phone            *string `json:"phone,omitempty"`
 	PlannedEventName *string `json:"planned_event_name,omitempty"`
+	// Roles menentukan menu yang ditampilkan app. Hak akses tetap diperiksa per endpoint.
+	Roles []string `json:"roles"`
+}
+
+// profileRoles: tenant bila punya usaha, organizer bila anggota organisasi, admin bila admin platform.
+func profileRoles(memberships []membership, admin bool) []string {
+	roles := []string{}
+	var tenant, organizer bool
+	for _, item := range memberships {
+		tenant = tenant || item.SubjectType == "business"
+		organizer = organizer || item.SubjectType == "organization"
+	}
+	if tenant {
+		roles = append(roles, "tenant")
+	}
+	if organizer {
+		roles = append(roles, "organizer")
+	}
+	if admin {
+		roles = append(roles, "admin")
+	}
+	return roles
 }
 
 func (s Store) me(c *gin.Context, account auth.Account) {
 	profile := accountProfile{Account: account}
-	var err error
-	if profile.Memberships, err = s.memberships(c.Request.Context(), account.ID); err == nil {
-		profile.Phone, profile.PlannedEventName, err = s.signup(c.Request.Context(), account.ID)
+	memberships, err := s.memberships(c.Request.Context(), account.ID)
+	if err != nil {
+		writeResult(c, http.StatusOK, accountProfile{}, err)
+		return
 	}
+	profile.Memberships = memberships
+	if profile.Phone, profile.PlannedEventName, err = s.signup(c.Request.Context(), account.ID); err != nil {
+		writeResult(c, http.StatusOK, accountProfile{}, err)
+		return
+	}
+	admin, err := s.isPlatformAdmin(c.Request.Context(), account.ID)
+	profile.Roles = profileRoles(memberships, admin)
 	writeResult(c, http.StatusOK, profile, err)
 }
 

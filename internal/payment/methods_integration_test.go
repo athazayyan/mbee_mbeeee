@@ -428,6 +428,15 @@ func TestWebhookHandlerTrustsProviderStatus(t *testing.T) {
 	}
 }
 
+// The migrations that change what an attempt charges, in the order they run.
+var paymentFeeMigration = map[string]bool{
+	"00020_payment_methods.up.sql":             true,
+	"00024_release_event_plans.up.sql":         true,
+	"00025_booking_payment_breakdown.up.sql":   true,
+	"00026_booking_payment_fee_version.up.sql": true,
+	"00036_unify_payment_fee_breakdown.up.sql": true,
+}
+
 // Databases that already hold attempts must upgrade cleanly through every payment migration: the old
 // booking total becomes a breakdown on the attempt, and the interim columns are retired.
 func TestPaymentFeeMigrationsBackfill(t *testing.T) {
@@ -451,10 +460,9 @@ func TestPaymentFeeMigrationsBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range files {
-		if !strings.HasSuffix(f.Name(), ".up.sql") || f.Name() < "00020_" {
+		if !strings.HasSuffix(f.Name(), ".up.sql") || !paymentFeeMigration[f.Name()] {
 			continue
 		}
-		// Only the payment migrations matter here; plan, layout, and booking-hold migrations also run in order.
 		sql, err := os.ReadFile("../../migrations/" + f.Name())
 		if err != nil {
 			t.Fatal(err)

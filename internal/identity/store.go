@@ -75,6 +75,12 @@ func (s Store) signup(ctx context.Context, userID string) (phone, eventName *str
 	return phone, eventName, err
 }
 
+func (s Store) isPlatformAdmin(ctx context.Context, userID string) (bool, error) {
+	var admin bool
+	err := s.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, userID).Scan(&admin)
+	return admin, err
+}
+
 func (s Store) categories(ctx context.Context) ([]category, error) {
 	rows, err := s.DB.Query(ctx, `SELECT id, name FROM business_categories ORDER BY name, id`)
 	return collect(rows, err, pgx.RowToStructByPos[category])

@@ -127,6 +127,56 @@ GRANT SELECT ON public.event_plans, public.event_plan_purchases TO :"api_role";
 GRANT INSERT (event_id, plan_code, purchased_by, amount, capacity_stands),
     UPDATE (plan_code, amount, capacity_stands, status, activated_at) ON public.event_plan_purchases TO :"api_role";
 GRANT EXECUTE ON FUNCTION public.cancel_unpaid_event_bookings(uuid, uuid) TO :"api_role";
+-- Produk dan stok usaha (E10): stok hanya berubah bersama baris inventory_movements.
+GRANT SELECT ON public.products, public.inventory_movements TO :"api_role";
+GRANT INSERT (business_id, name, sku, price, cost, category_id, stock, created_by),
+    UPDATE (name, sku, price, cost, category_id, stock, archived_at, updated_at) ON public.products TO :"api_role";
+GRANT INSERT (business_id, product_id, delta, reason, note, actor_id, sale_ref, adjustment_ref) ON public.inventory_movements TO :"api_role";
+-- Koreksi penjualan dan pengeluaran (E10-05): append-only, tanpa UPDATE atau DELETE untuk role API.
+GRANT SELECT ON public.sale_adjustments, public.sale_adjustment_items, public.expenses TO :"api_role";
+GRANT INSERT (business_id, sale_ref, type, reason, amount, created_by, idempotency_key, request_digest)
+    ON public.sale_adjustments TO :"api_role";
+GRANT INSERT (adjustment_id, sale_item_id, quantity) ON public.sale_adjustment_items TO :"api_role";
+GRANT INSERT (business_id, event_id, category, amount, occurred_at, note, created_by, idempotency_key, request_digest)
+    ON public.expenses TO :"api_role";
+-- Perangkat kasir (E11): didaftarkan saat membuka sesi, dicabut atau dipulihkan oleh pemilik usaha.
+GRANT SELECT ON public.pos_devices TO :"api_role";
+GRANT INSERT (business_id, id, label, registered_by),
+    UPDATE (label, last_seen_at, last_synced_at, revoked_at, revoked_by, revoke_reason) ON public.pos_devices TO :"api_role";
+-- Notifikasi (E15): inbox hanya bisa dibaca dan ditandai dibaca; isinya ditulis worker.
+GRANT SELECT ON public.notifications TO :"api_role";
+GRANT UPDATE (read_at) ON public.notifications TO :"api_role";
+-- Chat (E15): pesan hanya ditambah; moderasi admin menyembunyikan dan menutup laporan.
+GRANT SELECT ON public.conversations, public.messages, public.conversation_reads, public.message_reports TO :"api_role";
+GRANT INSERT (event_id, business_id, organization_id, booking_id, created_by), UPDATE (last_message_at)
+    ON public.conversations TO :"api_role";
+GRANT INSERT (conversation_id, sender_id, sender_side, client_message_id, body), UPDATE (hidden_at, hidden_by)
+    ON public.messages TO :"api_role";
+GRANT INSERT (conversation_id, user_id, last_read_at), UPDATE (last_read_at) ON public.conversation_reads TO :"api_role";
+GRANT INSERT (message_id, reporter_id, reason, note), UPDATE (status, resolved_at, resolved_by)
+    ON public.message_reports TO :"api_role";
+-- Ulasan (E15): edit menyimpan versi lama di review_revisions; moderasi hanya mengubah status.
+GRANT SELECT ON public.reviews, public.review_revisions TO :"api_role";
+GRANT INSERT (booking_id, event_id, business_id, organization_id, author_side, author_id, rating, comment),
+    UPDATE (rating, comment, updated_at, edit_count, status) ON public.reviews TO :"api_role";
+GRANT INSERT (review_id, rating, comment, edited_by) ON public.review_revisions TO :"api_role";
+-- Rapor usaha (E14): snapshot tidak pernah diubah; tautan berbagi hanya bisa dicabut dan dicatat dilihat.
+GRANT SELECT ON public.business_reports, public.report_shares TO :"api_role";
+GRANT INSERT (business_id, event_id, period_start, period_end, timezone, status, snapshot, verification_code,
+    cutoff_at, requested_by, completed_at) ON public.business_reports TO :"api_role";
+GRANT INSERT (business_id, report_id, token_hash, expires_at, created_by),
+    UPDATE (revoked_at, last_viewed_at, view_count) ON public.report_shares TO :"api_role";
+-- Kasir (E10): sesi per perangkat dan penjualan hasil sync; riwayat penjualan tidak pernah diubah langsung.
+GRANT SELECT ON public.pos_sessions, public.sales, public.sale_items TO :"api_role";
+GRANT INSERT (business_id, device_id, event_id, opened_by), UPDATE (closed_at) ON public.pos_sessions TO :"api_role";
+GRANT INSERT (business_id, sale_id, device_id, session_id, event_id, client_created_at, schema_version, payload_hash,
+    request_digest, currency, method, discount, total, synced_by) ON public.sales TO :"api_role";
+GRANT INSERT (business_id, sale_ref, position, product_id, product_name, quantity, unit_price, unit_cost, discount, subtotal)
+    ON public.sale_items TO :"api_role";
+-- Admin platform (E16): keanggotaan admin hanya dibaca API; pemberian lewat perintah grant-admin.
+GRANT SELECT ON public.platform_admins, public.admin_audit, public.plan_price_versions, public.plan_prices TO :"api_role";
+GRANT INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id) ON public.admin_audit TO :"api_role";
+GRANT UPDATE (verification_status, verified_at) ON public.organizations TO :"api_role";
 
 \if :runtime_booking_hold
 GRANT SELECT ON public.hold_policy_versions TO :"api_role";
@@ -172,5 +222,15 @@ GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.booki
 GRANT SELECT (booking_id, status), UPDATE (status) ON public.allocations TO :"worker_role";
 GRANT SELECT (id), INSERT (booking_id, from_status, to_status, reason)
     ON public.booking_status_history TO :"worker_role";
+
+-- Worker notifikasi: kumpulkan histori booking ke outbox, lalu tulis inbox pemilik usaha.
+GRANT SELECT (id, booking_id, to_status, reason, created_at) ON public.booking_status_history TO :"worker_role";
+GRANT SELECT (business_id) ON public.bookings TO :"worker_role";
+GRANT SELECT (id, name) ON public.events, public.businesses TO :"worker_role";
+GRANT SELECT (user_id, business_id, role) ON public.memberships TO :"worker_role";
+GRANT SELECT, INSERT (kind, source_ref, booking_id, event_id),
+    UPDATE (status, attempts, next_attempt_at, last_error, recipients, delivered_at) ON public.notification_outbox TO :"worker_role";
+GRANT SELECT (id, user_id, outbox_id), INSERT (user_id, outbox_id, kind, title, body, link)
+    ON public.notifications TO :"worker_role";
 
 COMMIT;
