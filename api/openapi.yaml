@@ -3957,13 +3957,348 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /conversations:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listConversations
+      summary: Daftar percakapan
+      description: Percakapan yang diikuti akun, aktivitas terbaru dulu, paling banyak 100.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/Conversation'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /conversations/unread-count:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: countUnreadMessages
+      summary: Hitung pesan belum dibaca
+      description: Pesan dari pihak lain di semua percakapan akun.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: 
+                    type: object
+                    required: [unread_count]
+                    properties:
+                      unread_count: {type: integer, minimum: 0}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /conversations/{id}:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: getConversation
+      summary: Baca percakapan
+      description: Hanya peserta.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Conversation'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /conversations/{id}/read:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: markConversationRead
+      summary: Tandai percakapan dibaca
+      description: Hanya peserta. Idempoten.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Berhasil tanpa isi respons
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /bookings/{id}/conversation:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: openBookingConversation
+      summary: Buka percakapan dari booking
+      description: Anggota usaha pemesan atau organisasi pemilik acara. Satu percakapan per acara dan usaha; 201 saat dibuat, 200 bila sudah ada.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '201':
+          description: Percakapan baru
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Conversation'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '200':
+          description: Percakapan yang sudah ada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Conversation'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /messages/{id}/reports:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: reportMessage
+      summary: Laporkan pesan
+      description: Peserta percakapan, bukan pengirim. Satu laporan per pelapor dan pesan; laporan ulang memberi 200.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageReportInput'}
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/MessageReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '200':
+          description: Laporan yang sudah ada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/MessageReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/message-reports:
+    get:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: listMessageReports
+      summary: Antrean laporan pesan
+      description: Admin platform. Status default open, terlama dulu.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [open, actioned, dismissed], default: open}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {type: array, items: {$ref: '#/components/schemas/ModerationReport'}}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /admin/message-reports/{id}/resolve:
+    post:
+      tags: ['Pesan, ulasan, dan notifikasi']
+      operationId: resolveMessageReport
+      summary: Tindak lanjuti laporan pesan
+      description: Admin platform. hide menyembunyikan pesan dan menutup semua laporan terbuka untuk pesan itu; dismiss menolak laporan ini. Keputusan tercatat di audit admin.
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MessageReportResolution'}
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/ModerationReport'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        '401':
+          description: Sesi pengguna atau tanda tangan provider tidak valid
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: Akses atau aksi tidak diizinkan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Resource tidak ditemukan atau tidak terlihat oleh pemanggil
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Konflik terhadap status atau data yang sudah tersimpan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: Isi request gagal divalidasi
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /conversations/{id}/messages:
     get:
       tags: ['Pesan, ulasan, dan notifikasi']
       operationId: listMessages
-      summary: '[Rencana] Baca pesan percakapan'
-      description: Hanya anggota percakapan.
-      x-implementation-status: planned
+      summary: Baca pesan percakapan
+      description: Hanya peserta percakapan (anggota usaha atau organisasi). Terbaru dulu; pesan yang disembunyikan
+        moderator memberi hidden=true dengan teks pengganti.
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4008,9 +4343,10 @@ paths:
     post:
       tags: ['Pesan, ulasan, dan notifikasi']
       operationId: sendMessage
-      summary: '[Rencana] Kirim pesan'
-      description: Hanya anggota. Gunakan client_message_id yang sama saat retry.
-      x-implementation-status: planned
+      summary: Kirim pesan
+      description: Hanya peserta. Gunakan client_message_id yang sama saat retry; retry dengan teks sama memberi 200
+        dan pesan yang sudah tersimpan, teks berbeda memberi 409. Batas 30 pesan per menit per akun (429).
+      x-implementation-status: implemented
       security:
       - AccessCookie: []
       parameters:
@@ -4024,6 +4360,16 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/MessageInput'}
       responses:
+        '200':
+          description: Retry dengan client_message_id yang sama
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: {$ref: '#/components/schemas/Message'}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
         '201':
           description: Berhasil
           content:
@@ -6002,13 +6348,81 @@ components:
         expires_at: {type: string, format: date-time}
     Message:
       type: object
-      required: [id, client_message_id, sender_id, text, created_at]
+      required: [id, client_message_id, sender_id, sender_side, text, created_at]
       properties:
         id: {type: string, format: uuid}
         client_message_id: {type: string, format: uuid}
         text: {type: string, minLength: 1, maxLength: 4000}
         sender_id: {type: string, format: uuid}
+        sender_side: {type: string, enum: [business, organization]}
         created_at: {type: string, format: date-time}
+        hidden: {type: boolean, description: Pesan disembunyikan moderator; text berisi pemberitahuan pengganti.}
+    Conversation:
+      type: object
+      required: [id, event_id, event_name, business_id, business_name, organization_id, organization_name, booking_id,
+        side, created_at, unread_count]
+      properties:
+        id: {type: string, format: uuid}
+        event_id: {type: string, format: uuid}
+        event_name: {type: string}
+        business_id: {type: string, format: uuid}
+        business_name: {type: string}
+        organization_id: {type: string, format: uuid}
+        organization_name: {type: string}
+        booking_id: {type: string, format: uuid}
+        side: {type: string, enum: [business, organization], description: Pihak akun pemanggil di percakapan ini.}
+        created_at: {type: string, format: date-time}
+        unread_count: {type: integer, minimum: 0}
+        last_message:
+          type: object
+          required: [text, sender_side, created_at]
+          properties:
+            text: {type: string}
+            sender_side: {type: string, enum: [business, organization]}
+            created_at: {type: string, format: date-time}
+            hidden: {type: boolean}
+    MessageReportInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, enum: [spam, abuse, fraud, other]}
+        note: {type: string, maxLength: 500, description: Wajib bila reason other.}
+    MessageReport:
+      type: object
+      required: [id, message_id, reason, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        reason: {type: string, enum: [spam, abuse, fraud, other]}
+        status: {type: string, enum: [open, actioned, dismissed]}
+        created_at: {type: string, format: date-time}
+    MessageReportResolution:
+      type: object
+      required: [action, reason]
+      properties:
+        action: {type: string, enum: [hide, dismiss]}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ModerationReport:
+      type: object
+      required: [id, status, reason, created_at, reporter_email, message_id, message_text, message_hidden, sender_email,
+        sender_side, event_name, business_name, organization_name, sent_at]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [open, actioned, dismissed]}
+        reason: {type: string, enum: [spam, abuse, fraud, other]}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+        resolved_at: {type: string, format: date-time}
+        reporter_email: {type: string}
+        message_id: {type: string, format: uuid}
+        message_text: {type: string, description: Isi asli pesan, juga bila sudah disembunyikan.}
+        message_hidden: {type: boolean}
+        sender_email: {type: string}
+        sender_side: {type: string, enum: [business, organization]}
+        event_name: {type: string}
+        business_name: {type: string}
+        organization_name: {type: string}
+        sent_at: {type: string, format: date-time}
     MessageInput:
       type: object
       required: [client_message_id, text]
