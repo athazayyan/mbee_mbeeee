@@ -18,12 +18,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	apidocs "kitakarsa.com/tenantku/backend/api"
+	"kitakarsa.com/tenantku/backend/internal/admin"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/booking"
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/identity"
+	"kitakarsa.com/tenantku/backend/internal/inventory"
 	"kitakarsa.com/tenantku/backend/internal/payment"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
+	"kitakarsa.com/tenantku/backend/internal/messaging"
+	"kitakarsa.com/tenantku/backend/internal/notify"
+	"kitakarsa.com/tenantku/backend/internal/reports"
+	"kitakarsa.com/tenantku/backend/internal/reviews"
 )
 
 func main() {
@@ -42,6 +48,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "worker" {
 		if err := runWorker(ctx, os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && (os.Args[1] == "grant-admin" || os.Args[1] == "revoke-admin") {
+		if err := manageAdmin(ctx, os.Args[1] == "grant-admin", os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -128,6 +140,12 @@ func run(ctx context.Context) error {
 		profiles := identity.Store{DB: pool}
 		eventStore := events.Store{DB: pool, PricingInventory: events.LayoutInventory{}, RequirePlan: planRequired}
 		bookings := booking.Store{DB: pool}
+		products := inventory.Store{DB: pool}
+		adminStore := admin.Store{DB: pool}
+		reportStore := reports.Store{DB: pool}
+		notifications := notify.Store{DB: pool}
+		chats := messaging.Store{DB: pool}
+		reviewStore := reviews.Store{DB: pool}
 		payments := payment.Store{DB: pool, PlanRequired: planRequired}
 		if key := os.Getenv("MIDTRANS_SERVER_KEY"); key != "" {
 			if os.Getenv("MIDTRANS_ENV") != "sandbox" {
@@ -145,6 +163,24 @@ func run(ctx context.Context) error {
 			}
 			if err := bookings.Ready(probe); err != nil {
 				return fmt.Errorf("booking schema unavailable; run make migrate: %w", err)
+			}
+			if err := products.Ready(probe); err != nil {
+				return fmt.Errorf("inventory schema unavailable; run make migrate: %w", err)
+			}
+			if err := adminStore.Ready(probe); err != nil {
+				return fmt.Errorf("admin schema unavailable; run make migrate: %w", err)
+			}
+			if err := reportStore.Ready(probe); err != nil {
+				return fmt.Errorf("report schema unavailable; run make migrate: %w", err)
+			}
+			if err := notifications.Ready(probe); err != nil {
+				return fmt.Errorf("notification schema unavailable; run make migrate: %w", err)
+			}
+			if err := chats.Ready(probe); err != nil {
+				return fmt.Errorf("messaging schema unavailable; run make migrate: %w", err)
+			}
+			if err := reviewStore.Ready(probe); err != nil {
+				return fmt.Errorf("review schema unavailable; run make migrate: %w", err)
 			}
 			if maxActiveHolds > 0 {
 				if _, err := pool.Exec(probe, "SELECT id FROM applications LIMIT 0"); err != nil {
@@ -183,6 +219,12 @@ func run(ctx context.Context) error {
 			return err
 		}
 		bookings.Routes(api, service)
+		products.Routes(api, service, origin)
+		adminStore.Routes(api, service, origin)
+		reportStore.Routes(api, service, origin)
+		notifications.Routes(api, service, origin)
+		chats.Routes(api, service, origin)
+		reviewStore.Routes(api, service, origin)
 		if maxActiveHolds > 0 {
 			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
 			settings := booking.HoldSettings{Lifetime: holdDuration, MaxActive: maxActiveHolds}
@@ -224,6 +266,12 @@ func run(ctx context.Context) error {
 		api.POST("/events/:id/publish", unavailable)
 		events.Store{}.Routes(api, nil, "")
 		booking.Store{}.Routes(api, nil)
+		inventory.Store{}.Routes(api, nil, "")
+		admin.Store{}.Routes(api, nil, "")
+		reports.Store{}.Routes(api, nil, "")
+		notify.Store{}.Routes(api, nil, "")
+		messaging.Store{}.Routes(api, nil, "")
+		reviews.Store{}.Routes(api, nil, "")
 		payment.Store{}.Routes(api, nil, "")
 	}
 	if !holdEnabled {

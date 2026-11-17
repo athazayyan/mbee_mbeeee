@@ -41,3 +41,6 @@ func Error(c *gin.Context, status int, code, message string, fields map[string]s
 		"code": code, "message": message, "fields": fields, "request_id": c.GetString(requestIDKey),
 	}})
 }
+
+// RequestIDOf mengembalikan request ID untuk dicatat di audit.
+func RequestIDOf(c *gin.Context) string { return c.GetString(requestIDKey) }
