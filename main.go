@@ -180,6 +180,8 @@ func run(ctx context.Context) error {
 				return errors.New("MIDTRANS_ENV must be sandbox to enable payments")
 			}
 			payments.Provider = payment.NewMidtrans(key, "sandbox")
+			// Sandbox payments cannot really be paid; this lets a tester settle their own attempt (see docs/pembayaran-midtrans.md).
+			payments.Simulation = os.Getenv("PAYMENT_SIMULATION") == "true"
 			adminStore.Payments = payments
 		}
 		// E09 needs the payment grants, so it follows the same switch as payments.

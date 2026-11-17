@@ -116,3 +116,17 @@ Catat hasilnya di TASKS.md pada E08-03 dan E08-06 setelah dijalankan.
 - Metode yang boleh di-refund sebagian lewat API untuk refund 50% (E09).
 - Mekanisme pencairan ke rekening penyelenggara (Midtrans Iris atau transfer manual).
 - Apakah metode tambahan (kartu, minimarket) perlu dirilis untuk pilot.
+
+## Menguji pembayaran berhasil di sandbox
+
+Halaman Snap dihosting Midtrans, jadi tombol "berhasil" tidak bisa ditambahkan ke dalamnya, dan sandbox tidak menerima pembayaran sungguhan. Ada dua cara:
+
+1. **Simulator resmi Midtrans** (`https://simulator.sandbox.midtrans.com`): untuk VA, masukkan nomor VA yang tampil di Snap; untuk QRIS atau GoPay, pindai atau tempel kode QR yang tampil.
+   Midtrans lalu mengirim webhook asli, jadi ini menguji jalur lengkap. Webhook ke mesin lokal membutuhkan tunnel (misalnya ngrok) ke `/api/v1/webhooks/payments/midtrans`, atau jalankan
+   `go run . payments process` / tombol **Periksa status pembayaran** setelah membayar di simulator.
+2. **Tombol simulasi di aplikasi**: set `PAYMENT_SIMULATION=true` dan restart API. Di halaman bayar stand (tenant) dan halaman Paket acara (penyelenggara) muncul
+   **Simulasikan pembayaran berhasil**. Tombol memanggil `POST /payments/{id}/simulate-success`, yang hanya boleh dipakai pembuat pembayaran untuk pembayarannya sendiri yang masih
+   terbuka, lalu menerapkan settlement lewat jalur webhook (booking terkonfirmasi, ledger tercatat, paket aktif) tanpa verifikasi ke Midtrans.
+   Rute ini tidak ada bila `PAYMENT_SIMULATION` kosong, dan pembayaran sendiri hanya berjalan di sandbox.
+
+Pembayaran hasil simulasi bukan transaksi di Midtrans, jadi refund lewat API Midtrans untuknya akan ditolak provider dan masuk ke penanganan manual.

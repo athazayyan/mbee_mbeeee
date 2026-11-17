@@ -2872,6 +2872,50 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
+  /payments/simulation:
+    get:
+      tags: [Pembayaran dan operasional dana]
+      operationId: getPaymentSimulation
+      summary: Cek apakah simulasi pembayaran sandbox aktif
+      description: Publik. enabled bernilai true hanya bila server dijalankan dengan PAYMENT_SIMULATION=true dan Midtrans sandbox dikonfigurasi. Klien menampilkan tombol simulasi hanya bila true.
+      x-implementation-status: implemented
+      security: []
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: object
+                    required: [enabled]
+                    properties:
+                      enabled: {type: boolean}
+                  meta: {$ref: '#/components/schemas/EmptyMeta'}
+        default: {$ref: '#/components/responses/Error'}
+  /payments/{id}/simulate-success:
+    post:
+      tags: [Pembayaran dan operasional dana]
+      operationId: simulatePaymentSuccess
+      summary: Simulasikan pembayaran berhasil (sandbox)
+      description: Hanya saat PAYMENT_SIMULATION=true. Pembuat pembayaran menandai pembayarannya sendiri yang masih terbuka sebagai berhasil, lewat jalur yang sama dengan webhook settlement (booking terkonfirmasi atau paket aktif, ledger tercatat) tanpa verifikasi ke Midtrans, karena sandbox tidak bisa dibayar sungguhan. Pembayaran yang sudah dibayar dijawab 204 tanpa perubahan. Bila fitur mati, rute ini tidak ada (404).
+      x-implementation-status: implemented
+      security:
+      - AccessCookie: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204': {description: Pembayaran ditandai berhasil}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /plans:
     get:
       tags: [Pembayaran dan operasional dana]
