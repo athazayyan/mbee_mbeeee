@@ -1,0 +1,15 @@
+.git
+**/.git
+.env*
+**/.env*
+**/.netrc
+**/.ssh
+**/*.pem
+**/*.key
+/backend
+/tenantku
+/bin
+/data
+/uploads
+**/*.test
+**/*.out
