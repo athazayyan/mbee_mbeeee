@@ -42,7 +42,7 @@ type Input struct {
 }
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM payment_attempts, payment_events, payment_exceptions,
+	_, err := s.DB.Exec(ctx, `SELECT payment_attempts.rent_amount FROM payment_attempts, payment_events, payment_exceptions,
 		ledger_transactions, ledger_entries, event_plans, event_plan_purchases LIMIT 0`)
 	return err
 }
@@ -87,13 +87,13 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		}
 
 		var status string
-		var total int64
+		var total, rent, platformFee, providerFee int64
 		var expires, now time.Time
-		err = tx.QueryRow(ctx, `SELECT b.status, b.total, b.expires_at
+		err = tx.QueryRow(ctx, `SELECT b.status, b.total, b.expires_at, b.rent, b.platform_fee, b.provider_fee
 			FROM bookings b JOIN events e ON e.id = b.event_id
 			WHERE b.id = $1 AND e.status IN ('published', 'live') AND (b.created_by = $2 OR EXISTS (
 				SELECT 1 FROM memberships m WHERE m.user_id = $2 AND m.role = 'owner' AND m.business_id = b.business_id))
-			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &total, &expires)
+			FOR UPDATE OF b`, bookingID, actor).Scan(&status, &total, &expires, &rent, &platformFee, &providerFee)
 		if err != nil {
 			return err
 		}
@@ -114,9 +114,10 @@ func (s Store) CreateAttempt(ctx context.Context, actor, email, bookingID, key s
 		}
 
 		result, err = scanAttempt(tx.QueryRow(ctx, `INSERT INTO payment_attempts
-			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest)
-			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7) RETURNING `+attemptColumns,
-			bookingID, actor, input.Method, total, expires, key, digest[:]))
+			(booking_id, created_by, provider, method, status, amount, expires_at, idempotency_key, request_digest,
+			rent_amount, platform_fee_amount, provider_fee_amount)
+			VALUES ($1, $2, 'midtrans', $3, 'created', $4, $5, $6, $7, $8, $9, $10) RETURNING `+attemptColumns,
+			bookingID, actor, input.Method, total, expires, key, digest[:], rent, platformFee, providerFee))
 		if err != nil {
 			return err
 		}
@@ -297,8 +298,10 @@ func (s Store) apply(ctx context.Context, tx pgx.Tx, n Notification, eventID int
 	var bookingStatus string
 	var rent, platformFee, providerFee int64
 	var expires, now time.Time
-	if err := tx.QueryRow(ctx, `SELECT status, rent, platform_fee, provider_fee, expires_at
-		FROM bookings WHERE id = $1 FOR UPDATE`, bookingID).Scan(&bookingStatus, &rent, &platformFee, &providerFee, &expires); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT b.status, COALESCE(p.rent_amount, b.rent),
+		COALESCE(p.platform_fee_amount, b.platform_fee), COALESCE(p.provider_fee_amount, b.provider_fee), b.expires_at
+		FROM bookings b JOIN payment_attempts p ON p.booking_id = b.id AND p.id = $2
+		WHERE b.id = $1 FOR UPDATE OF b`, bookingID, attemptID).Scan(&bookingStatus, &rent, &platformFee, &providerFee, &expires); err != nil {
 		return "", err
 	}
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {

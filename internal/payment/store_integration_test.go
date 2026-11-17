@@ -170,6 +170,10 @@ func TestPaymentLifecycle(t *testing.T) {
 	if err != nil || !created || attempt.Amount != 31500 || attempt.Status != "pending" || attempt.CheckoutURL == "" {
 		t.Fatalf("attempt %+v created=%v err=%v", attempt, created, err)
 	}
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE id = $1
+		AND rent_amount = 30000 AND platform_fee_amount = 1000 AND provider_fee_amount = 500`, attempt.ID) != 1 {
+		t.Fatal("payment attempt must preserve the booking amount breakdown")
+	}
 	if got := one(t, ctx, s, `SELECT status FROM bookings WHERE id = $1`, booking); got != "payment_pending" {
 		t.Fatalf("booking status %s", got)
 	}
