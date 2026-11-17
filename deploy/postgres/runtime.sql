@@ -137,6 +137,11 @@ GRANT INSERT (conversation_id, sender_id, sender_side, client_message_id, body),
 GRANT INSERT (conversation_id, user_id, last_read_at), UPDATE (last_read_at) ON public.conversation_reads TO :"api_role";
 GRANT INSERT (message_id, reporter_id, reason, note), UPDATE (status, resolved_at, resolved_by)
     ON public.message_reports TO :"api_role";
+-- Ulasan (E15): edit menyimpan versi lama di review_revisions; moderasi hanya mengubah status.
+GRANT SELECT ON public.reviews, public.review_revisions TO :"api_role";
+GRANT INSERT (booking_id, event_id, business_id, organization_id, author_side, author_id, rating, comment),
+    UPDATE (rating, comment, updated_at, edit_count, status) ON public.reviews TO :"api_role";
+GRANT INSERT (review_id, rating, comment, edited_by) ON public.review_revisions TO :"api_role";
 -- Rapor usaha (E14): snapshot tidak pernah diubah; tautan berbagi hanya bisa dicabut dan dicatat dilihat.
 GRANT SELECT ON public.business_reports, public.report_shares TO :"api_role";
 GRANT INSERT (business_id, event_id, period_start, period_end, timezone, status, snapshot, verification_code,
