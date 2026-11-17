@@ -287,8 +287,14 @@ func (s Store) readable(ctx context.Context, user, id string) (readyUpload, erro
 // public mengembalikan banner acara yang sudah ready; tujuan lain tidak pernah publik.
 func (s Store) public(ctx context.Context, id string) (readyUpload, error) {
 	var value readyUpload
-	err := s.DB.QueryRow(ctx, `SELECT storage_key, content_type, size_bytes FROM uploads
-		WHERE id = $1 AND status = 'ready' AND purpose = 'event_banner'`, id).Scan(&value.key, &value.contentType, &value.size)
+	// Banner acara selalu publik. Foto produk publik hanya bila produknya aktif dan usahanya mengisi stand
+	// terkonfirmasi di acara yang sedang terbit, sama dengan yang tampil di denah publik.
+	err := s.DB.QueryRow(ctx, `SELECT u.storage_key, u.content_type, u.size_bytes FROM uploads u
+		WHERE u.id = $1 AND u.status = 'ready' AND (u.purpose = 'event_banner' OR (u.purpose = 'product_photo' AND EXISTS (
+			SELECT 1 FROM products p
+			JOIN bookings b ON b.business_id = p.business_id AND b.status = 'confirmed'
+			JOIN events e ON e.id = b.event_id AND e.status IN ('published', 'live')
+			WHERE p.photo_upload_id = u.id AND p.archived_at IS NULL)))`, id).Scan(&value.key, &value.contentType, &value.size)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return value, errNotFound
 	}
