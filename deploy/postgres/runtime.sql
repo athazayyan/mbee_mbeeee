@@ -125,6 +125,9 @@ GRANT INSERT (business_id, event_id, category, amount, occurred_at, note, create
 GRANT SELECT ON public.pos_devices TO :"api_role";
 GRANT INSERT (business_id, id, label, registered_by),
     UPDATE (label, last_seen_at, last_synced_at, revoked_at, revoked_by, revoke_reason) ON public.pos_devices TO :"api_role";
+-- Notifikasi (E15): inbox hanya bisa dibaca dan ditandai dibaca; isinya ditulis worker.
+GRANT SELECT ON public.notifications TO :"api_role";
+GRANT UPDATE (read_at) ON public.notifications TO :"api_role";
 -- Rapor usaha (E14): snapshot tidak pernah diubah; tautan berbagi hanya bisa dicabut dan dicatat dilihat.
 GRANT SELECT ON public.business_reports, public.report_shares TO :"api_role";
 GRANT INSERT (business_id, event_id, period_start, period_end, timezone, status, snapshot, verification_code,
@@ -176,5 +179,15 @@ GRANT SELECT (id, status, expires_at, event_id), UPDATE (status) ON public.booki
 GRANT SELECT (booking_id, status), UPDATE (status) ON public.allocations TO :"worker_role";
 GRANT SELECT (id), INSERT (booking_id, from_status, to_status, reason)
     ON public.booking_status_history TO :"worker_role";
+
+-- Worker notifikasi: kumpulkan histori booking ke outbox, lalu tulis inbox pemilik usaha.
+GRANT SELECT (id, booking_id, to_status, reason, created_at) ON public.booking_status_history TO :"worker_role";
+GRANT SELECT (business_id) ON public.bookings TO :"worker_role";
+GRANT SELECT (id, name) ON public.events, public.businesses TO :"worker_role";
+GRANT SELECT (user_id, business_id, role) ON public.memberships TO :"worker_role";
+GRANT SELECT, INSERT (kind, source_ref, booking_id, event_id),
+    UPDATE (status, attempts, next_attempt_at, last_error, recipients, delivered_at) ON public.notification_outbox TO :"worker_role";
+GRANT SELECT (id, user_id, outbox_id), INSERT (user_id, outbox_id, kind, title, body, link)
+    ON public.notifications TO :"worker_role";
 
 COMMIT;
