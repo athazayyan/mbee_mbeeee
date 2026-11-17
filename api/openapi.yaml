@@ -1438,7 +1438,7 @@ paths:
       tags: [Denah dan harga]
       operationId: replacePricing
       summary: Tetapkan versi aturan harga acara
-      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
+      description: Pemilik dapat menyimpan harga pada draft atau acara terbit/berlangsung yang belum berakhir. Saat EVENT_PLAN_REQUIRED aktif, paket aktif dan kapasitas denah yang sesuai wajib sebelum menyimpan harga. Pada acara terbit, versi baru mencakup semua slot yang masih terbuka dan mewarisi kuota kategori pada waktu efektifnya. Snapshot booking tetap tersimpan. Urutan harga adalah stand, blok, slot, lalu acara. Waktu server dipakai jika effective_at tidak diisi.
       x-implementation-status: implemented
       security:
       - AccessCookie: []
