@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Demo data for `tenantku seed-demo`: five events in Banda Aceh and Lhokseumawe, their organizers, and tenants.
 // Names are invented. Dates are relative to the day the command runs so the events are always upcoming.
@@ -94,6 +97,33 @@ type demoProduct struct {
 	name        string
 	price, cost int64
 	stock       int
+}
+
+// photoRules picks a seed photo (see seed_assets) for a product by words in its name. The first rule that matches wins.
+var photoRules = []struct{ contains, photo string }{
+	{"Mie Aceh", "mie_bakso.webp"}, {"Sanger", "sanger.jpg"}, {"Kopi Gayo", "kopi_gayo.jpg"}, {"Biji Kopi", "kopi_beans.jpg"},
+	{"Cold Brew", "cold_brew.jpg"}, {"Kopi", "kopi_cup.jpg"}, {"Es Timun", "es_tabung.jpg"}, {"Es Kelapa", "es_tabung.jpg"},
+	{"Boba", "boba.jpg"}, {"Thai Tea", "thai_tea.jpg"}, {"Kue Adee", "kue_adee.jpg"}, {"Bolu", "bolu.jpg"}, {"Kue Bhoi", "kue_bhoi.jpg"},
+	{"Timphan", "timphan.jpg"}, {"Pulut", "pulut.jpg"}, {"Keumamah", "keumamah.jpg"}, {"Nasi Gurih", "nasi_gurih.jpg"},
+	{"Sate", "sate.jpg"}, {"Lontong", "lontong.jpg"}, {"Martabak Telur", "martabak_telur.jpg"}, {"Martabak Manis", "martabak_manis.jpg"},
+	{"Roti Cane", "roti_cane.jpg"}, {"Roti Selai", "roti_bakar.jpg"}, {"Wajeb", "wajeb.jpg"}, {"Dodol", "dodol.jpg"},
+	{"Kuah Beulangong", "kuah_beulangong.jpg"}, {"Nasi Putih", "nasi_putih.jpg"}, {"Songket", "songket.jpg"},
+	{"Peci", "topi_anyaman.jpg"}, {"Kupiah", "topi_anyaman.jpg"}, {"Kemeja Batik", "batik_kain.jpg"}, {"Kain Batik", "batik_kain.jpg"},
+	{"Kaos", "kaos.jpg"}, {"Hijab", "hijab.jpg"}, {"Pashmina", "pashmina.jpg"}, {"Rencong", "rencong.jpg"},
+	{"Gantungan", "gantungan.jpg"}, {"Tas Anyaman", "tas_anyaman.jpg"}, {"Tikar", "tikar.jpg"}, {"Topi Anyaman", "topi_anyaman.jpg"},
+	{"Tempat Tisu", "tisu.jpg"}, {"Cangkir", "keramik_cangkir.jpg"}, {"Piring Hias", "keramik_piring.jpg"},
+	{"Polaroid", "polaroid.jpg"}, {"Cetak Foto", "polaroid.jpg"}, {"Henna", "henna.jpg"}, {"Make Up", "makeup.jpg"}, {"Sablon", "sablon.jpg"},
+	{"Magnet", "magnet.jpg"}, {"Pin ", "pin.jpg"}, {"Kaktus", "kaktus.jpg"}, {"Sukulen", "sukulen.jpg"}, {"Madu", "madu.jpg"},
+	{"Komik", "buku_resep.jpg"}, {"Buku", "buku_resep.jpg"},
+}
+
+func photoFor(product string) string {
+	for _, rule := range photoRules {
+		if strings.Contains(product, rule.contains) {
+			return rule.photo
+		}
+	}
+	return ""
 }
 
 type demoTenant struct {

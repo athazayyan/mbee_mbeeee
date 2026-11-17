@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +18,9 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/events"
 	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 )
+
+//go:embed seed_assets/*.jpg seed_assets/*.webp
+var seedPhotos embed.FS
 
 // seedDemo fills a development database with an admin, five organizers with one published event each, and tenants
 // with products. It is safe to run again: accounts keep their ids (and get their password reset), events are skipped
@@ -147,6 +153,12 @@ func (s *seeder) run(ctx context.Context) error {
 		tenantRows = append(tenantRows, []string{email, demoTenantPassword, tenant.business, tenant.category, note})
 	}
 
+	photos, err := s.attachPhotos(ctx)
+	if err != nil {
+		return fmt.Errorf("product photos: %w", err)
+	}
+	slog.Info("product photos attached", "products", photos)
+
 	fmt.Println("## Akun admin")
 	fmt.Println("| Email | Password |\n| --- | --- |")
 	fmt.Printf("| %s | %s |\n\n", demoAdminEmail, demoAdminPassword)
@@ -271,4 +283,81 @@ func (s *seeder) tenant(ctx context.Context, index int, email string, tenant dem
 		_, err = tx.Exec(ctx, `INSERT INTO application_status_history (application_id, actor_id, to_status) VALUES ($1, $2, 'submitted')`, application, actor)
 		return err
 	})
+}
+
+// attachPhotos gives every seeded product without a photo one from seed_assets, stored the way an upload is: a file in
+// UPLOAD_DIR and a ready row in uploads owned by the business. A photo is shared by the products of one business that use it.
+// Run it from the same directory as the API, or set UPLOAD_DIR to the API's value.
+func (s *seeder) attachPhotos(ctx context.Context) (int, error) {
+	dir := os.Getenv("UPLOAD_DIR")
+	if dir == "" {
+		dir = "data/uploads"
+	}
+	rows, err := s.pool.Query(ctx, `SELECT p.id::text, p.name, p.business_id::text, b.owner_id::text FROM products p
+		JOIN businesses b ON b.id = p.business_id WHERE p.photo_upload_id IS NULL AND p.archived_at IS NULL ORDER BY p.created_at`)
+	if err != nil {
+		return 0, err
+	}
+	type product struct{ id, name, business, owner string }
+	var todo []product
+	for rows.Next() {
+		var p product
+		if err := rows.Scan(&p.id, &p.name, &p.business, &p.owner); err != nil {
+			return 0, err
+		}
+		todo = append(todo, p)
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return 0, rows.Err()
+	}
+	attached := 0
+	for _, p := range todo {
+		photo := photoFor(p.name)
+		if photo == "" {
+			continue
+		}
+		upload, err := s.photoUpload(ctx, dir, p.business, p.owner, photo)
+		if err != nil {
+			return attached, fmt.Errorf("%s: %w", p.name, err)
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE products SET photo_upload_id = $2 WHERE id = $1 AND photo_upload_id IS NULL`, p.id, upload); err != nil {
+			return attached, err
+		}
+		attached++
+	}
+	return attached, nil
+}
+
+// photoUpload returns the ready upload of a seed photo for a business, creating the file and the row on first use.
+func (s *seeder) photoUpload(ctx context.Context, dir, business, owner, photo string) (string, error) {
+	name := strings.TrimSuffix(strings.TrimSuffix(photo, ".jpg"), ".webp")
+	key := "product_photo/seed-" + strings.ReplaceAll(name, ".", "_") + "-" + business
+	var id string
+	err := s.pool.QueryRow(ctx, `SELECT id::text FROM uploads WHERE storage_key = $1`, key).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	data, err := seedPhotos.ReadFile("seed_assets/" + photo)
+	if err != nil {
+		return "", err
+	}
+	contentType := http.DetectContentType(data)
+	if contentType != "image/jpeg" && contentType != "image/webp" && contentType != "image/png" {
+		return "", fmt.Errorf("%s is not a supported image (%s)", photo, contentType)
+	}
+	target := filepath.Join(dir, filepath.FromSlash(key))
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(target, data, 0o640); err != nil {
+		return "", err
+	}
+	err = s.pool.QueryRow(ctx, `INSERT INTO uploads (purpose, owner_type, owner_id, content_type, size_bytes, storage_key, status, created_by, expires_at, completed_at)
+		VALUES ('product_photo', 'business', $1, $2, $3, $4, 'ready', $5, clock_timestamp(), clock_timestamp())
+		ON CONFLICT (storage_key) DO UPDATE SET status = 'ready' RETURNING id::text`, business, contentType, len(data), key, owner).Scan(&id)
+	return id, err
 }

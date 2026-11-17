@@ -1,0 +1,50 @@
+# Kredit foto seed
+
+Foto produk demo untuk `tenantku seed-demo`. Tiga foto (`es_tabung`, `mie_bakso`, `kopi_cup`) disediakan tim TenantKu. Sisanya diambil dari Wikimedia Commons dengan lisensi terbuka; tiap baris memuat berkas, pembuat, lisensi, dan halaman sumbernya.
+
+- `batik_kain.jpg`: File:Peranakan batik altar cloth, late 19th century, East-West Center.JPG — Hiart — CC0 — https://commons.wikimedia.org/wiki/File:Peranakan_batik_altar_cloth,_late_19th_century,_East-West_Center.JPG
+- `boba.jpg`: File:Pearl Milk Tea in Chun Shui Tang.jpg — Battlesnake1 — CC0 — https://commons.wikimedia.org/wiki/File:Pearl_Milk_Tea_in_Chun_Shui_Tang.jpg
+- `buku_resep.jpg`: File:Handwritten cookbook by Dorothea Grimm.jpg — Kritzolina — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Handwritten_cookbook_by_Dorothea_Grimm.jpg
+- `cold_brew.jpg`: File:Maple Cream Cold Brew - Trading Post Coffee Roasters 2026-07-16.jpg — Andy Li — CC0 — https://commons.wikimedia.org/wiki/File:Maple_Cream_Cold_Brew_-_Trading_Post_Coffee_Roasters_2026-07-16.jpg
+- `dodol.jpg`: File:Dodol Garut Cihampelas Bandung.JPG — Midori — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Dodol_Garut_Cihampelas_Bandung.JPG
+- `gantungan.jpg`: File:Gantungan kunci.jpg — Andriana rubber — CC0 — https://commons.wikimedia.org/wiki/File:Gantungan_kunci.jpg
+- `henna.jpg`: File:Henna Hand - മൈലാഞ്ചി കൈ.jpg — Shijan Kaakkara — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Henna_Hand_-_%E0%B4%AE%E0%B5%88%E0%B4%B2%E0%B4%BE%E0%B4%9E%E0%B5%8D%E0%B4%9A%E0%B4%BF_%E0%B4%95%E0%B5%88.jpg
+- `hijab.jpg`: File:Hijabis - 2017 (37019672366).jpg — Sophie Barat — CC BY 2.0 — https://commons.wikimedia.org/wiki/File:Hijabis_-_2017_(37019672366).jpg
+- `kaktus.jpg`: File:Cactus-plant-pot-stand-1599155636.jpg — Ukman12345 — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Cactus-plant-pot-stand-1599155636.jpg
+- `kaos.jpg`: File:Ambigram Ideal, polysymmetrical logo printed on a green T-shirt.jpg — Basile Morin — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Ambigram_Ideal,_polysymmetrical_logo_printed_on_a_green_T-shirt.jpg
+- `keramik_cangkir.jpg`: File:Beker in aardewerk, collectie- Raakvlak, BR88-PSK-2-13.jpg —  — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Beker_in_aardewerk,_collectie-_Raakvlak,_BR88-PSK-2-13.jpg
+- `keramik_piring.jpg`: File:Mid-C19 french decorative plate triumphal arch anagoria.jpg — Anagoria — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Mid-C19_french_decorative_plate_triumphal_arch_anagoria.jpg
+- `keumamah.jpg`: File:Keumamah Aceh.jpg — Andrianika — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Keumamah_Aceh.jpg
+- `kopi_beans.jpg`: File:Roasted coffee beans.jpg — MarkSweep — Public domain — https://commons.wikimedia.org/wiki/File:Roasted_coffee_beans.jpg
+- `kopi_gayo.jpg`: File:Kopi Hitam King Gayo Arabika.jpg — Adilarmaya — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Kopi_Hitam_King_Gayo_Arabika.jpg
+- `kuah_beulangong.jpg`: File:Kuah Beulangong.JPG — Si Gam — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Kuah_Beulangong.JPG
+- `madu.jpg`: File:Three French monofloral honey jars.jpg — Hayden Soloviev — CC BY 4.0 — https://commons.wikimedia.org/wiki/File:Three_French_monofloral_honey_jars.jpg
+- `magnet.jpg`: File:Fridge Magnet of Berlin NK.JPG — Nasir Khan Saikat — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Fridge_Magnet_of_Berlin_NK.JPG
+- `makeup.jpg`: File:Makeup weapons Brushes .jpg — Makeupweapons — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Makeup_weapons_Brushes_.jpg
+- `martabak_manis.jpg`: File:Terang Bulan roasted chicken.JPG — SpartacksCompatriot — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Terang_Bulan_roasted_chicken.JPG
+- `martabak_telur.jpg`: File:MartabakTelur.JPG — Sakurai Midori — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:MartabakTelur.JPG
+- `nasi_gurih.jpg`: File:Nasi Gurih Khas Medan.jpg — Lim Natee — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Nasi_Gurih_Khas_Medan.jpg
+- `nasi_putih.jpg`: File:Meshi 001.jpg — Ocdp — CC0 — https://commons.wikimedia.org/wiki/File:Meshi_001.jpg
+- `pashmina.jpg`: File:Pashmina scarf with woven elephant design 03.jpg — Kritzolina — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Pashmina_scarf_with_woven_elephant_design_03.jpg
+- `pin.jpg`: File:Sleepground Lapel pin (Sandbox).jpg — Drcbrothephotographer — CC0 — https://commons.wikimedia.org/wiki/File:Sleepground_Lapel_pin_(Sandbox).jpg
+- `polaroid.jpg`: File:Appareil photo instantané Polaroid Spirit 600 (1).jpg — Pierre André Leclercq — CC0 — https://commons.wikimedia.org/wiki/File:Appareil_photo_instantan%C3%A9_Polaroid_Spirit_600_(1).jpg
+- `rencong.jpg`: File:COLLECTIE TROPENMUSEUM IJzeren lemmet met houten met schede TMnr 1662-1.jpg — Tropenmuseum — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:COLLECTIE_TROPENMUSEUM_IJzeren_lemmet_met_houten_met_schede_TMnr_1662-1.jpg
+- `roti_bakar.jpg`: File:Roti bakar kekinian.jpg — Pinerineks — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Roti_bakar_kekinian.jpg
+- `roti_cane.jpg`: File:Roti Cane Kari Aceh.jpg — Gunawan Kartapranata — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Roti_Cane_Kari_Aceh.jpg
+- `sablon.jpg`: File:T-shirt with Kanye West design.jpg — Creativesblock — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:T-shirt_with_Kanye_West_design.jpg
+- `sanger.jpg`: File:Sanger Aceh.JPG — Si Gam — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Sanger_Aceh.JPG
+- `songket.jpg`: File:Menenun songket asli 20241116 111954.jpg — Swarabakti — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Menenun_songket_asli_20241116_111954.jpg
+- `sukulen.jpg`: File:Succulent plant in the Groot-shaped pot.jpg — Picwizard — CC BY 4.0 — https://commons.wikimedia.org/wiki/File:Succulent_plant_in_the_Groot-shaped_pot.jpg
+- `tas_anyaman.jpg`: File:Tas Anyaman Rotan.jpg — SilviaMamas — CC0 — https://commons.wikimedia.org/wiki/File:Tas_Anyaman_Rotan.jpg
+- `thai_tea.jpg`: File:Cha yen.JPG — Takeaway — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Cha_yen.JPG
+- `tikar.jpg`: File:Tikar Rompok.jpg — Zahirulnukman — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Tikar_Rompok.jpg
+- `tisu.jpg`: File:Spielzeug aus Holz und Körbe aus Rattan (Peddingrohr), Österreich.jpg — Naturpuur — CC BY 4.0 — https://commons.wikimedia.org/wiki/File:Spielzeug_aus_Holz_und_K%C3%B6rbe_aus_Rattan_(Peddingrohr),_%C3%96sterreich.jpg
+- `topi_anyaman.jpg`: File:Topi anyaman Dayak di Rumah Betang Sei Pasah, Kapuas.jpg — Mia Sulisnawati — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Topi_anyaman_Dayak_di_Rumah_Betang_Sei_Pasah,_Kapuas.jpg
+- `wajeb.jpg`: File:8. Wajik 2.jpg — Danangtrihartanto — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:8._Wajik_2.jpg
+- `bolu.jpg`: File:Kue bolu kukus Pasar Bulu Semarang.JPG — Midori — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Kue_bolu_kukus_Pasar_Bulu_Semarang.JPG
+- `kue_adee.jpg`: File:Bu Leukat Asoe Kaya.jpg — Si_Gam — CC BY-SA 3.0 — https://commons.wikimedia.org/wiki/File:Bu_Leukat_Asoe_Kaya.jpg
+- `kue_bhoi.jpg`: File:Kue kering Idul Fitri.JPG — Midori — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Kue_kering_Idul_Fitri.JPG
+- `lontong.jpg`: File:Lontong.jpg — No machine-readable author provided. Diádoco assumed (based on copyright claims) — CC BY 3.0 — https://commons.wikimedia.org/wiki/File:Lontong.jpg
+- `pulut.jpg`: File:Pulut Panggang (4573392511).jpg — Alpha from Melbourne, Australia — CC BY-SA 2.0 — https://commons.wikimedia.org/wiki/File:Pulut_Panggang_(4573392511).jpg
+- `sate.jpg`: File:Sate Ayam Panggang.jpg — Meandkancil2020 — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Sate_Ayam_Panggang.jpg
+- `timphan.jpg`: File:Timphan Asoe Kaya.jpg — Si Gam — CC BY-SA 4.0 — https://commons.wikimedia.org/wiki/File:Timphan_Asoe_Kaya.jpg
