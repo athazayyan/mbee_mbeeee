@@ -30,6 +30,7 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/notify"
 	"kitakarsa.com/tenantku/backend/internal/reports"
 	"kitakarsa.com/tenantku/backend/internal/reviews"
+	"kitakarsa.com/tenantku/backend/internal/uploads"
 )
 
 func main() {
@@ -146,6 +147,12 @@ func run(ctx context.Context) error {
 		notifications := notify.Store{DB: pool}
 		chats := messaging.Store{DB: pool}
 		reviewStore := reviews.Store{DB: pool}
+		uploadDir := os.Getenv("UPLOAD_DIR")
+		if uploadDir == "" {
+			uploadDir = "data/uploads"
+		}
+		files := uploads.Store{DB: pool, Storage: uploads.LocalStorage{Dir: uploadDir},
+			Key: uploads.SigningKey(os.Getenv("JWT_SIGNING_KEY")), Origin: origin}
 		payments := payment.Store{DB: pool, PlanRequired: planRequired}
 		if key := os.Getenv("MIDTRANS_SERVER_KEY"); key != "" {
 			if os.Getenv("MIDTRANS_ENV") != "sandbox" {
@@ -181,6 +188,9 @@ func run(ctx context.Context) error {
 			}
 			if err := reviewStore.Ready(probe); err != nil {
 				return fmt.Errorf("review schema unavailable; run make migrate: %w", err)
+			}
+			if err := files.Ready(probe); err != nil {
+				return fmt.Errorf("upload store unavailable; run make migrate and check UPLOAD_DIR: %w", err)
 			}
 			if maxActiveHolds > 0 {
 				if _, err := pool.Exec(probe, "SELECT id FROM applications LIMIT 0"); err != nil {
@@ -225,6 +235,7 @@ func run(ctx context.Context) error {
 		notifications.Routes(api, service, origin)
 		chats.Routes(api, service, origin)
 		reviewStore.Routes(api, service, origin)
+		files.Routes(api, service, origin)
 		if maxActiveHolds > 0 {
 			source := events.HoldOfferSource{Inventory: events.LayoutInventory{}, Policies: events.StoredHoldPolicies{}}
 			settings := booking.HoldSettings{Lifetime: holdDuration, MaxActive: maxActiveHolds}
@@ -272,6 +283,7 @@ func run(ctx context.Context) error {
 		notify.Store{}.Routes(api, nil, "")
 		messaging.Store{}.Routes(api, nil, "")
 		reviews.Store{}.Routes(api, nil, "")
+		uploads.Store{}.Routes(api, nil, "")
 		payment.Store{}.Routes(api, nil, "")
 	}
 	if !holdEnabled {

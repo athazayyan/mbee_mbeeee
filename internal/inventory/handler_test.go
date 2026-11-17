@@ -31,7 +31,7 @@ func TestValidateProductCreate(t *testing.T) {
 		{"negative cost", `{"name":"Teh","price":1,"cost":-5}`, "cost"},
 		{"bad sku", `{"name":"Teh","price":1,"sku":"a b"}`, "sku"},
 		{"bad category", `{"name":"Teh","price":1,"category_id":"x"}`, "category_id"},
-		{"photo not supported", `{"name":"Teh","price":1,"photo_upload_id":"8c7c3b0e-8f3a-4b8e-9d55-1a2b3c4d5e6f"}`, "photo_upload_id"},
+		{"photo id rusak", `{"name":"Teh","price":1,"photo_upload_id":"bukan-uuid"}`, "photo_upload_id"},
 		{"negative initial stock", `{"name":"Teh","price":1,"initial_stock":-1}`, "initial_stock"},
 		{"too much initial stock", `{"name":"Teh","price":1,"initial_stock":1000001}`, "initial_stock"},
 		{"archived on create", `{"name":"Teh","price":1,"archived":true}`, "archived"},
