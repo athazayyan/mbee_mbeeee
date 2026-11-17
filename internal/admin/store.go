@@ -10,24 +10,34 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 )
 
+// Rechecker asks the payment provider for the real status of an attempt and applies it exactly like a webhook.
+type Rechecker interface {
+	Recheck(ctx context.Context, attemptID string) error
+}
+
 type Store struct {
-	DB *pgxpool.Pool
+	DB       *pgxpool.Pool
+	Payments Rechecker
 }
 
 var errForbidden = errors.New("platform admin required")
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM platform_admins, admin_audit, plan_price_versions, plan_prices LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT permissions FROM platform_admins LIMIT 0`)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(ctx, `SELECT 1 FROM admin_audit, plan_price_versions, plan_prices, payment_methods LIMIT 0`)
 	return err
 }
 
 // IsAdmin dipakai juga oleh GET /me untuk menentukan menu admin.
 func (s Store) IsAdmin(ctx context.Context, userID string) (bool, error) {
-	var admin bool
-	err := s.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, userID).Scan(&admin)
-	return admin, err
+	permissions, err := adminperm.Of(ctx, s.DB, userID)
+	return len(permissions) > 0, err
 }
 
 type Overview struct {
@@ -75,11 +85,13 @@ type Organization struct {
 }
 
 type pageFilter struct {
-	Query   string
-	Status  string
-	AfterAt time.Time
-	AfterID string
-	Limit   int
+	Query        string
+	Status       string
+	ResourceType string
+	ResourceID   string
+	AfterAt      time.Time
+	AfterID      string
+	Limit        int
 }
 
 const organizationColumns = `o.id::text, o.name, o.verification_status, o.verified_at, o.created_at, u.email,
@@ -111,17 +123,18 @@ type auditRecord struct {
 	before, after                                              any
 }
 
+// writeAudit appends one row to the audit log. Secrets in the snapshots are redacted before storing.
 func writeAudit(ctx context.Context, tx pgx.Tx, record auditRecord) error {
-	before, err := json.Marshal(record.before)
+	before, err := adminperm.Redacted(record.before)
 	if err != nil {
 		return err
 	}
-	after, err := json.Marshal(record.after)
+	after, err := adminperm.Redacted(record.after)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO admin_audit (actor_id, action, resource_type, resource_id, reason, before, after, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, record.actor, record.action, record.resourceType, record.resourceID,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, record.actor, record.action, record.resourceType, nilIfEmpty(record.resourceID),
 		record.reason, before, after, record.requestID)
 	return err
 }
@@ -130,7 +143,7 @@ func writeAudit(ctx context.Context, tx pgx.Tx, record auditRecord) error {
 func (s Store) setVerification(ctx context.Context, actor, id, status, reason, requestID string) (Organization, error) {
 	var result Organization
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		if err := requireAdmin(ctx, tx, actor); err != nil {
+		if err := requireAdmin(ctx, tx, actor, adminperm.OrganizationsVerify); err != nil {
 			return err
 		}
 		var current string
@@ -163,12 +176,13 @@ func (s Store) setVerification(ctx context.Context, actor, id, status, reason, r
 	return result, err
 }
 
-func requireAdmin(ctx context.Context, tx pgx.Tx, actor string) error {
-	var admin bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, actor).Scan(&admin); err != nil {
+// requireAdmin checks the permission inside the transaction that performs the action.
+func requireAdmin(ctx context.Context, tx pgx.Tx, actor, permission string) error {
+	allowed, err := adminperm.Has(ctx, tx, actor, permission)
+	if err != nil {
 		return err
 	}
-	if !admin {
+	if !allowed {
 		return errForbidden
 	}
 	return nil
@@ -219,9 +233,11 @@ func (s Store) audit(ctx context.Context, filter pageFilter) ([]AuditEvent, erro
 		a.resource_id::text, a.reason, a.before, a.after, a.occurred_at, a.request_id
 		FROM admin_audit a JOIN users u ON u.id = a.actor_id
 		WHERE ($1 = '' OR a.action = $1)
+		AND ($5 = '' OR a.resource_type = $5)
+		AND ($6 = '' OR a.resource_id::text = $6)
 		AND ($2::uuid IS NULL OR (a.occurred_at, a.id) < ($3, $2::uuid))
 		ORDER BY a.occurred_at DESC, a.id DESC LIMIT $4`,
-		filter.Status, nilIfEmpty(filter.AfterID), filter.AfterAt, filter.Limit)
+		filter.Status, nilIfEmpty(filter.AfterID), filter.AfterAt, filter.Limit, filter.ResourceType, filter.ResourceID)
 	if err != nil {
 		return nil, err
 	}

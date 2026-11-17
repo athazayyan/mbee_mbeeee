@@ -18,6 +18,9 @@ const (
 	accountEscrow      = "organizer_escrow"
 	accountRevenue     = "platform_revenue"
 	accountProviderFee = "provider_fee_payable"
+	// Money already set aside from escrow for a refund or payout that the provider has not completed yet.
+	accountRefundPayable = "refund_payable"
+	accountPayoutPayable = "payout_payable"
 )
 
 // Ledger kinds keep received payments, plan prices, reversals, refunds, and payouts apart.
@@ -25,7 +28,9 @@ const (
 	kindPayment     = "payment_received"
 	kindPlanPayment = "plan_payment_received"
 	kindReversal    = "reversal"
+	kindRefundHold  = "refund_reserved"
 	kindRefund      = "refund_issued"
+	kindPayoutHold  = "payout_reserved"
 	kindPayout      = "payout_released"
 )
 
@@ -87,18 +92,65 @@ func recordPlanPayment(ctx context.Context, tx pgx.Tx, attemptID string, amount 
 	return err
 }
 
-// RecordRefund books money returned to a tenant (E09). It leaves the organizer's escrow and the provider balance.
-func RecordRefund(ctx context.Context, tx pgx.Tx, refundID string, amount int64) error {
-	_, err := post(ctx, tx, kindRefund, "refund", refundID, nil, []Entry{
-		{accountEscrow, "debit", amount}, {accountClearing, "credit", amount},
+// ReserveRefund sets a refund aside from the organizer's escrow as soon as it is owed, so a payout can no
+// longer spend it. The money is still held by the provider until RecordRefund.
+func ReserveRefund(ctx context.Context, tx pgx.Tx, refundID string, amount int64) error {
+	_, err := post(ctx, tx, kindRefundHold, "refund", refundID, nil, []Entry{
+		{accountEscrow, "debit", amount}, {accountRefundPayable, "credit", amount},
 	})
 	return err
 }
 
-// RecordPayout books a payout of released rent to the organizer's bank account (E09).
+// RecordRefund books a refund the provider (or an operator) completed: it leaves the reserved amount and the provider balance.
+func RecordRefund(ctx context.Context, tx pgx.Tx, refundID string, amount int64) error {
+	_, err := post(ctx, tx, kindRefund, "refund", refundID, nil, []Entry{
+		{accountRefundPayable, "debit", amount}, {accountClearing, "credit", amount},
+	})
+	return err
+}
+
+// RecordRefundFee books the provider's processing fee for a refund against the organizer's escrow.
+func RecordRefundFee(ctx context.Context, tx pgx.Tx, refundID string, fee int64) error {
+	if fee == 0 {
+		return nil
+	}
+	_, err := post(ctx, tx, kindRefund, "refund_fee", refundID, nil, []Entry{
+		{accountEscrow, "debit", fee}, {accountProviderFee, "credit", fee},
+	})
+	return err
+}
+
+// ReservePayout sets the requested payout aside from escrow until the transfer is confirmed.
+func ReservePayout(ctx context.Context, tx pgx.Tx, payoutID string, amount int64) error {
+	_, err := post(ctx, tx, kindPayoutHold, "payout", payoutID, nil, []Entry{
+		{accountEscrow, "debit", amount}, {accountPayoutPayable, "credit", amount},
+	})
+	return err
+}
+
+// RecordPayout books a confirmed transfer of released rent to the organizer's bank account.
 func RecordPayout(ctx context.Context, tx pgx.Tx, payoutID string, amount int64) error {
 	_, err := post(ctx, tx, kindPayout, "payout", payoutID, nil, []Entry{
-		{accountEscrow, "debit", amount}, {accountClearing, "credit", amount},
+		{accountPayoutPayable, "debit", amount}, {accountClearing, "credit", amount},
+	})
+	return err
+}
+
+// ReleasePayoutReservation returns a failed payout's reserved amount to escrow with a mirror entry.
+func ReleasePayoutReservation(ctx context.Context, tx pgx.Tx, payoutID string) error {
+	var reserved string
+	var amount int64
+	err := tx.QueryRow(ctx, `SELECT t.id, e.amount FROM ledger_transactions t JOIN ledger_entries e ON e.transaction_id = t.id
+		WHERE t.kind = 'payout_reserved' AND t.ref_type = 'payout' AND t.ref_id = $1 AND e.account = 'organizer_escrow'`,
+		payoutID).Scan(&reserved, &amount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNothingToReverse
+	}
+	if err != nil {
+		return err
+	}
+	_, err = post(ctx, tx, kindReversal, "payout", payoutID, &reserved, []Entry{
+		{accountPayoutPayable, "debit", amount}, {accountEscrow, "credit", amount},
 	})
 	return err
 }

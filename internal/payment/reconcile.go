@@ -26,6 +26,23 @@ type ReconcileReport struct {
 	Balances       map[string]int64 `json:"balances"`
 }
 
+// Recheck asks the provider for the real status of one attempt and applies it through the webhook path, so a
+// repeat is harmless (E16-03). It is what an admin's retry runs.
+func (s Store) Recheck(ctx context.Context, attemptID string) error {
+	if s.Provider == nil {
+		return ErrUnavailable
+	}
+	verified, err := s.Provider.Status(ctx, attemptID)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(verified)
+	if err != nil {
+		return err
+	}
+	return s.ApplyNotification(ctx, verified, payload)
+}
+
 // Reconcile heals missed webhooks and verifies the ledger against payment attempts.
 //
 //  1. Attempts still open after staleAfter are checked against the provider's status API and applied

@@ -20,6 +20,7 @@ import (
 const maxEventInput = 64 << 10
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+var instagramPattern = regexp.MustCompile(`^[A-Za-z0-9._]{1,30}$`)
 
 type eventInput struct {
 	Name        *string    `json:"name"`
@@ -32,6 +33,8 @@ type eventInput struct {
 	Description *string    `json:"description"`
 	Facilities  *[]string  `json:"facilities"`
 	Terms       *string    `json:"terms"`
+	// Instagram is the event's account; a leading @ is dropped and an empty value clears it.
+	Instagram *string `json:"instagram"`
 }
 
 func (input eventInput) apply(value event) event {
@@ -48,6 +51,9 @@ func (input eventInput) apply(value event) event {
 	}
 	if input.Terms != nil {
 		value.Terms = nilIfEmpty(*input.Terms)
+	}
+	if input.Instagram != nil {
+		value.Instagram = nilIfEmpty(*input.Instagram)
 	}
 	return value
 }
@@ -229,6 +235,13 @@ func validateEventInput(input eventInput, create, withSlug bool) fieldErrors {
 			}
 		}
 	}
+	if input.Instagram != nil {
+		handle := strings.TrimPrefix(strings.TrimSpace(*input.Instagram), "@")
+		if handle != "" && !instagramPattern.MatchString(handle) {
+			fields["instagram"] = "Gunakan akun Instagram tanpa spasi, misalnya pasarmalam.acehbesar."
+		}
+		*input.Instagram = handle
+	}
 	if input.Facilities != nil {
 		if len(*input.Facilities) > 20 {
 			fields["facilities"] = "Masukkan maksimal 20 fasilitas."
@@ -281,6 +294,8 @@ func writeError(c *gin.Context, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Acara atau organisasi tidak ditemukan.", nil)
 	case errors.Is(err, errDraftRequired):
 		httpapi.Error(c, http.StatusConflict, "EVENT_NOT_DRAFT", "Aksi ini hanya tersedia pada draft acara.", nil)
+	case errors.Is(err, errActiveEventExists):
+		httpapi.Error(c, http.StatusConflict, "ACTIVE_EVENT_EXISTS", "Penyelenggara hanya dapat memiliki satu acara aktif. Selesaikan atau batalkan acara yang sedang berjalan sebelum membuat acara baru.", nil)
 	case errors.Is(err, errPricingClosed):
 		httpapi.Error(c, http.StatusConflict, "EVENT_PRICING_CLOSED", "Harga acara sudah tidak dapat diubah.", nil)
 	case errors.Is(err, errRevisionRequired):

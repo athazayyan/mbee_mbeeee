@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
@@ -76,6 +77,9 @@ func (s Store) duplicateEvent(c *gin.Context, account auth.Account) {
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		source, err := lockOwnedEvent(ctx, tx, account.ID, id)
 		if err != nil {
+			return err
+		}
+		if err := ensureNoActiveEvent(ctx, tx, source.OrganizationID); err != nil {
 			return err
 		}
 		source.Name, source.Slug = input.Name, input.Slug
@@ -172,6 +176,10 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 			if !closed {
 				return errCancellationNeedsBookingWorkflow
 			}
+		}
+		// Applications still waiting for a decision can no longer be approved (E09-05).
+		if err := funds.WithdrawApplications(ctx, tx, id, actor); err != nil {
+			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO event_status_history
 			(event_id, actor_id, from_status, to_status, reason)

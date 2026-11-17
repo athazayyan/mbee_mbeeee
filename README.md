@@ -95,6 +95,8 @@ Migration mengisi tarif paket Mini hingga Large dan tarif dasar Custom. Custom m
 
 Metode bayar sewa (E08) dirilis lewat tabel `payment_methods`: `bca_va` (Rp4.000) dan `other_qris` (Rp0), dengan biaya admin per metode yang ditanggung tenant. Total pembayaran adalah sewa ditambah biaya admin. Tarif bawaan adalah estimasi dan harus diganti dengan tarif kontrak. `go run . payments check` memverifikasi channel di sandbox dan `go run . payments reconcile` merekonsiliasi attempt dan ledger. Detail, ledger, dan langkah uji webhook hosted ada di [docs/pembayaran-midtrans.md](docs/pembayaran-midtrans.md). Isi `MIDTRANS_CLIENT_KEY` untuk perintah `check`.
 
+Check-in, refund pembatalan 50%, sengketa, dan pencairan dana (E09) ada di paket `internal/funds`. Refund pembatalan acara diproses worker (jalur `event_cancellation_refunds`); `go run . payments process` secara berkala mengirim refund hasil sengketa. Pencairan dan refund sengketa manual dikonfirmasi admin di `/admin/dana`. Kebijakan, ledger, dan runbook ada di [docs/dana-refund-pencairan.md](docs/dana-refund-pencairan.md).
+
 Untuk menguji API pembayaran, terapkan migration dan jalankan skrip role dengan `-v payment_sandbox=true`. Isi `MIDTRANS_ENV=sandbox` dan `MIDTRANS_SERVER_KEY` dengan kredensial sandbox di environment API. Kosongkan server key dan jalankan ulang skrip role tanpa flag sandbox saat pembayaran tidak digunakan. API memverifikasi status langsung ke Midtrans sebelum mengubah booking.
 
 Untuk memproses instruksi refund pembatalan di sandbox, pasang konfigurasi Midtrans yang sama pada worker dan set `EVENT_REFUND_SANDBOX_ENABLED=true`. Worker mengirim refund parsial QRIS dengan referensi yang stabil, lalu menunggu konfirmasi bank dari hasil pengecekan provider sebelum mencatat jurnal. Metode seperti VA masuk status `manual_review` untuk tindak lanjut operasional.
@@ -127,3 +129,9 @@ export TENANTKU_TEST_DATABASE_URL='postgres://user:password@localhost:5432/tenan
 DATABASE_URL="$TENANTKU_TEST_DATABASE_URL" make migrate
 make check
 ```
+
+## Akun dan data demo
+
+`go run . seed-demo` (dengan akun migration) mengisi admin, lima penyelenggara dengan acara terbit di Banda Aceh dan Lhokseumawe, dan 30 tenant.
+Daftar akun, kata sandi, aturan satu acara per penyelenggara dan satu acara dalam satu waktu per tenant ada di [docs/akun-demo.md](docs/akun-demo.md).
+Panel admin, izin, tarif, dan kalkulator ada di [docs/panel-admin.md](docs/panel-admin.md).

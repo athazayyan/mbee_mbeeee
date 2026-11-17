@@ -21,7 +21,9 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/admin"
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/booking"
+	"kitakarsa.com/tenantku/backend/internal/calculator"
 	"kitakarsa.com/tenantku/backend/internal/events"
+	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/inventory"
 	"kitakarsa.com/tenantku/backend/internal/messaging"
@@ -61,6 +63,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "grant-admin" || os.Args[1] == "revoke-admin") {
 		if err := manageAdmin(ctx, os.Args[1] == "grant-admin", os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "seed-demo" {
+		if err := seedDemo(ctx, os.Args[2:]); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -172,6 +180,13 @@ func run(ctx context.Context) error {
 				return errors.New("MIDTRANS_ENV must be sandbox to enable payments")
 			}
 			payments.Provider = payment.NewMidtrans(key, "sandbox")
+			adminStore.Payments = payments
+		}
+		// E09 needs the payment grants, so it follows the same switch as payments.
+		fundsEnabled := payments.Provider != nil || planRequired
+		fundStore := funds.Store{}
+		if fundsEnabled {
+			fundStore = funds.Store{DB: pool, Provider: payments.Provider}
 		}
 		checkSchema := func(probe context.Context) error {
 			if err := profiles.Ready(probe); err != nil {
@@ -212,6 +227,11 @@ func run(ctx context.Context) error {
 					return fmt.Errorf("hold policy store unavailable; check migrations and booking grants: %w", err)
 				}
 			}
+			if fundsEnabled {
+				if err := fundStore.Ready(probe); err != nil {
+					return fmt.Errorf("funds schema unavailable; run make migrate and apply runtime grants: %w", err)
+				}
+			}
 			if payments.Provider != nil || planRequired {
 				if err := payments.Ready(probe); err != nil {
 					return fmt.Errorf("payment schema unavailable; check migrations and sandbox grants: %w", err)
@@ -243,6 +263,7 @@ func run(ctx context.Context) error {
 		bookings.Routes(api, service)
 		products.Routes(api, service, origin)
 		adminStore.Routes(api, service, origin)
+		calculator.Routes(api, origin)
 		reportStore.Routes(api, service, origin)
 		notifications.Routes(api, service, origin)
 		chats.Routes(api, service, origin)
@@ -260,6 +281,7 @@ func run(ctx context.Context) error {
 			holdEnabled = true
 		}
 		payments.Routes(api, service, origin)
+		fundStore.Routes(api, service, origin)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
@@ -291,12 +313,14 @@ func run(ctx context.Context) error {
 		booking.Store{}.Routes(api, nil)
 		inventory.Store{}.Routes(api, nil, "")
 		admin.Store{}.Routes(api, nil, "")
+		calculator.Routes(api, "")
 		reports.Store{}.Routes(api, nil, "")
 		notify.Store{}.Routes(api, nil, "")
 		messaging.Store{}.Routes(api, nil, "")
 		reviews.Store{}.Routes(api, nil, "")
 		uploads.Store{}.Routes(api, nil, "")
 		payment.Store{}.Routes(api, nil, "")
+		funds.Store{}.Routes(api, nil, "")
 	}
 	if !holdEnabled {
 		unavailable := func(c *gin.Context) {

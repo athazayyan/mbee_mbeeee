@@ -348,3 +348,55 @@ func (m *Midtrans) EnabledChannels(ctx context.Context, token string) ([]string,
 	}
 	return channels, nil
 }
+
+// ErrRefundUnsupported means the provider cannot refund this transaction through the API, for example a
+// bank transfer. The refund then has to be paid back to the tenant by hand.
+var ErrRefundUnsupported = errors.New("provider cannot refund this payment")
+
+// RefundResult is what Midtrans reported for a refund request.
+type RefundResult struct {
+	// Reference is Midtrans' refund identifier, kept for reconciliation.
+	Reference string
+}
+
+// Refund asks Midtrans to return part of a settled payment. refundKey makes the request idempotent: Midtrans
+// rejects a second refund with the same key instead of paying twice.
+func (m *Midtrans) Refund(ctx context.Context, orderID, refundKey string, amount int64, reason string) (RefundResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	payload, err := json.Marshal(map[string]any{"refund_key": refundKey, "amount": amount, "reason": reason})
+	if err != nil {
+		return RefundResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.StatusURL+"/"+orderID+"/refund", bytes.NewReader(payload))
+	if err != nil {
+		return RefundResult{}, ErrProvider
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(m.ServerKey, "")
+	res, err := m.HTTP.Do(req)
+	if err != nil {
+		return RefundResult{}, ErrProvider
+	}
+	defer res.Body.Close()
+	var body struct {
+		StatusCode         string      `json:"status_code"`
+		StatusMessage      string      `json:"status_message"`
+		RefundChargebackID json.Number `json:"refund_chargeback_id"`
+		RefundKey          string      `json:"refund_key"`
+		TransactionStatus  string      `json:"transaction_status"`
+	}
+	if json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&body) != nil {
+		return RefundResult{}, ErrProvider
+	}
+	// Midtrans reports most outcomes inside a 200 response, so the body's status_code decides.
+	switch body.StatusCode {
+	case "200":
+		return RefundResult{Reference: body.RefundKey}, nil
+	case "412", "400", "406":
+		// Not refundable by API (payment type, status, or amount). A person must handle it.
+		return RefundResult{}, fmt.Errorf("%w: %s", ErrRefundUnsupported, body.StatusMessage)
+	}
+	return RefundResult{}, fmt.Errorf("%w: refund returned %q", ErrProvider, body.StatusCode)
+}

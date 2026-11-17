@@ -124,6 +124,9 @@ func (s Store) Submit(ctx context.Context, actor, eventID string, input Applicat
 		if !open {
 			return ErrNotBookable
 		}
+		if err := ensureFreeToJoin(ctx, tx, business, eventID); err != nil {
+			return err
+		}
 		// An approval whose offer lapsed or was cancelled no longer blocks a new application.
 		lapsed, err := tx.Query(ctx, `UPDATE applications a SET status = 'expired', updated_at = clock_timestamp()
 			FROM bookings b WHERE a.booking_id = b.id AND a.event_id = $1 AND a.business_id = $2 AND a.status = 'approved'

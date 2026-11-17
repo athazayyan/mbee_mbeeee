@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"kitakarsa.com/tenantku/backend/internal/platform/adminperm"
 )
 
 // manageAdmin memberi atau mencabut admin platform. Sengaja hanya lewat perintah server dengan
@@ -19,8 +20,22 @@ func manageAdmin(ctx context.Context, grant bool, args []string) error {
 	if grant {
 		command = "grant-admin"
 	}
-	if len(args) != 1 || !strings.Contains(args[0], "@") {
-		return fmt.Errorf("usage: tenantku %s <email>", command)
+	usage := fmt.Errorf("usage: tenantku %s <email>", command)
+	if grant {
+		usage = fmt.Errorf("usage: tenantku grant-admin <email> [permission,permission,...]  (default: all of %s)",
+			strings.Join(adminperm.All, ", "))
+	}
+	if len(args) < 1 || len(args) > 2 || (!grant && len(args) != 1) || !strings.Contains(args[0], "@") {
+		return usage
+	}
+	permissions := adminperm.All
+	if len(args) == 2 {
+		permissions = strings.Split(args[1], ",")
+		for _, permission := range permissions {
+			if !adminperm.Valid(permission) {
+				return fmt.Errorf("unknown permission %q; choose from %s", permission, strings.Join(adminperm.All, ", "))
+			}
+		}
 	}
 	email := strings.ToLower(strings.TrimSpace(args[0]))
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -43,14 +58,15 @@ func manageAdmin(ctx context.Context, grant bool, args []string) error {
 		return err
 	}
 	if grant {
-		_, err = conn.Exec(ctx, `INSERT INTO platform_admins (user_id, note) VALUES ($1, 'granted via CLI')
-			ON CONFLICT (user_id) DO NOTHING`, userID)
+		// Granting again replaces the permission list, which is how an admin is narrowed.
+		_, err = conn.Exec(ctx, `INSERT INTO platform_admins (user_id, note, permissions) VALUES ($1, 'granted via CLI', $2)
+			ON CONFLICT (user_id) DO UPDATE SET permissions = EXCLUDED.permissions`, userID, permissions)
 	} else {
 		_, err = conn.Exec(ctx, `DELETE FROM platform_admins WHERE user_id = $1`, userID)
 	}
 	if err != nil {
 		return err
 	}
-	slog.Info("platform admin updated", "command", command, "user_id", userID)
+	slog.Info("platform admin updated", "command", command, "user_id", userID, "permissions", permissions)
 	return nil
 }

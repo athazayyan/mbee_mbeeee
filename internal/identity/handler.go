@@ -44,6 +44,8 @@ type accountProfile struct {
 	PlannedEventName *string `json:"planned_event_name,omitempty"`
 	// Roles menentukan menu yang ditampilkan app. Hak akses tetap diperiksa per endpoint.
 	Roles []string `json:"roles"`
+	// AdminPermissions lists what a platform admin may do; the panel hides the rest.
+	AdminPermissions []string `json:"admin_permissions,omitempty"`
 }
 
 // profileRoles: tenant bila punya usaha, organizer bila anggota organisasi, admin bila admin platform.
@@ -78,8 +80,9 @@ func (s Store) me(c *gin.Context, account auth.Account) {
 		writeResult(c, http.StatusOK, accountProfile{}, err)
 		return
 	}
-	admin, err := s.isPlatformAdmin(c.Request.Context(), account.ID)
-	profile.Roles = profileRoles(memberships, admin)
+	permissions, err := s.adminPermissions(c.Request.Context(), account.ID)
+	profile.Roles = profileRoles(memberships, len(permissions) > 0)
+	profile.AdminPermissions = permissions
 	writeResult(c, http.StatusOK, profile, err)
 }
 
@@ -264,6 +267,8 @@ func writeResult(c *gin.Context, status int, data any, err error) {
 		httpapi.Error(c, http.StatusNotFound, "NOT_FOUND", "Profil tidak ditemukan.", nil)
 	case errors.Is(err, errBusinessAlreadyExists):
 		httpapi.Error(c, http.StatusConflict, "BUSINESS_ALREADY_EXISTS", "Akun ini sudah memiliki profil usaha.", nil)
+	case errors.Is(err, errOrganizationAlreadyExists):
+		httpapi.Error(c, http.StatusConflict, "ORGANIZATION_ALREADY_EXISTS", "Akun ini sudah memiliki profil penyelenggara.", nil)
 	case errors.As(err, &dbError) && dbError.ConstraintName == "businesses_category_id_fkey":
 		validate(c, map[string]string{"category_id": "Pilih kategori usaha yang tersedia."})
 	default:

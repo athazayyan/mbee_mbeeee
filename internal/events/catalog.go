@@ -29,6 +29,7 @@ type publicEvent struct {
 	Description      *string   `json:"description,omitempty"`
 	Facilities       []string  `json:"facilities"`
 	Terms            *string   `json:"terms,omitempty"`
+	Instagram        *string   `json:"instagram,omitempty"`
 	MinRent          *int64    `json:"min_rent,omitempty"`
 	MaxRent          *int64    `json:"max_rent,omitempty"`
 	Capacity         *int32    `json:"capacity,omitempty"`
@@ -70,13 +71,13 @@ func (filter catalogFilter) statuses() []string {
 }
 
 const publicEventColumns = `e.id::text, e.organization_id::text, o.name, e.status, e.name, e.slug, e.starts_at,
-	e.ends_at, e.timezone, e.city, e.address, e.description, e.facilities, e.terms`
+	e.ends_at, e.timezone, e.city, e.address, e.description, e.facilities, e.terms, e.instagram`
 
 func scanPublicEvent(row pgx.Row) (publicEvent, error) {
 	var value publicEvent
 	err := row.Scan(&value.ID, &value.OrganizationID, &value.OrganizationName, &value.Status, &value.Name, &value.Slug,
 		&value.StartsAt, &value.EndsAt, &value.Timezone, &value.City, &value.Address, &value.Description,
-		&value.Facilities, &value.Terms)
+		&value.Facilities, &value.Terms, &value.Instagram)
 	return value, err
 }
 

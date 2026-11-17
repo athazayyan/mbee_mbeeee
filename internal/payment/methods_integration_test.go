@@ -337,20 +337,26 @@ func TestReconcileAndLedgerKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordRefund(ctx, tx, "00000000-0000-4000-8000-0000000000c1", 15000); err != nil {
-		t.Fatal(err)
-	}
-	if err := RecordPayout(ctx, tx, "00000000-0000-4000-8000-0000000000c2", 15000); err != nil {
-		t.Fatal(err)
+	// Each is reserved from escrow first, then completed against the provider balance.
+	for _, step := range []func() error{
+		func() error { return ReserveRefund(ctx, tx, "00000000-0000-4000-8000-0000000000c1", 15000) },
+		func() error { return RecordRefund(ctx, tx, "00000000-0000-4000-8000-0000000000c1", 15000) },
+		func() error { return ReservePayout(ctx, tx, "00000000-0000-4000-8000-0000000000c2", 15000) },
+		func() error { return RecordPayout(ctx, tx, "00000000-0000-4000-8000-0000000000c2", 15000) },
+	} {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if count(t, ctx, s, `SELECT count(*) FROM ledger_transactions WHERE kind IN ('refund_issued','payout_released')`) != 2 {
+	if count(t, ctx, s, `SELECT count(*) FROM ledger_transactions WHERE kind IN ('refund_reserved','refund_issued','payout_reserved','payout_released')`) != 4 {
 		t.Fatal("refund and payout were not posted as separate kinds")
 	}
 	balances, err := s.Balances(ctx)
-	if err != nil || balances[accountEscrow] != -30000+30000 || balances[accountClearing] != 34000-30000 {
+	if err != nil || balances[accountEscrow] != 0 || balances[accountClearing] != 34000-30000 ||
+		balances[accountRefundPayable] != 0 || balances[accountPayoutPayable] != 0 {
 		t.Fatalf("balances after refund and payout %v %v", balances, err)
 	}
 }
