@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"kitakarsa.com/tenantku/backend/internal/auth"
+	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/platform/httpapi"
 )
 
@@ -138,12 +139,9 @@ func (s Store) cancel(ctx context.Context, actor, id, reason string) (event, err
 			return err
 		}
 		if hasBookings {
-			var closed bool
-			if err := tx.QueryRow(ctx, `SELECT public.cancel_unpaid_event_bookings($1, $2)`, id, actor).Scan(&closed); err != nil {
+			// Holds and offers are released, unpaid payments are closed, and paid bookings are refunded (E09-05).
+			if _, err := funds.SettleCancellation(ctx, tx, id, actor); err != nil {
 				return err
-			}
-			if !closed {
-				return errCancellationNeedsBookingWorkflow
 			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO event_status_history

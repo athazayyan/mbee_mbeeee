@@ -22,6 +22,7 @@ import (
 	"kitakarsa.com/tenantku/backend/internal/auth"
 	"kitakarsa.com/tenantku/backend/internal/booking"
 	"kitakarsa.com/tenantku/backend/internal/events"
+	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/identity"
 	"kitakarsa.com/tenantku/backend/internal/inventory"
 	"kitakarsa.com/tenantku/backend/internal/messaging"
@@ -160,6 +161,12 @@ func run(ctx context.Context) error {
 			}
 			payments.Provider = payment.NewMidtrans(key, "sandbox")
 		}
+		// E09 needs the payment grants, so it follows the same switch as payments.
+		fundsEnabled := payments.Provider != nil || planRequired
+		fundStore := funds.Store{}
+		if fundsEnabled {
+			fundStore = funds.Store{DB: pool, Provider: payments.Provider}
+		}
 		checkSchema := func(probe context.Context) error {
 			if err := profiles.Ready(probe); err != nil {
 				return fmt.Errorf("identity schema unavailable; run make migrate: %w", err)
@@ -194,6 +201,11 @@ func run(ctx context.Context) error {
 				}
 				if _, err := pool.Exec(probe, "SELECT version FROM hold_policy_versions LIMIT 0"); err != nil {
 					return fmt.Errorf("hold policy store unavailable; check migrations and booking grants: %w", err)
+				}
+			}
+			if fundsEnabled {
+				if err := fundStore.Ready(probe); err != nil {
+					return fmt.Errorf("funds schema unavailable; run make migrate and apply runtime grants: %w", err)
 				}
 			}
 			if payments.Provider != nil || planRequired {
@@ -243,6 +255,7 @@ func run(ctx context.Context) error {
 			holdEnabled = true
 		}
 		payments.Routes(api, service, origin)
+		fundStore.Routes(api, service, origin)
 		router.GET("/readyz", func(c *gin.Context) {
 			probe, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 			defer cancel()
@@ -279,6 +292,7 @@ func run(ctx context.Context) error {
 		messaging.Store{}.Routes(api, nil, "")
 		reviews.Store{}.Routes(api, nil, "")
 		payment.Store{}.Routes(api, nil, "")
+		funds.Store{}.Routes(api, nil, "")
 	}
 	if !holdEnabled {
 		unavailable := func(c *gin.Context) {

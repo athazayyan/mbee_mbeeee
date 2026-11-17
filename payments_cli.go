@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"kitakarsa.com/tenantku/backend/internal/funds"
 	"kitakarsa.com/tenantku/backend/internal/payment"
 )
 
-const paymentsUsage = "usage: tenantku payments <check|reconcile>"
+const paymentsUsage = "usage: tenantku payments <check|reconcile|process>"
 
 // runPayments holds the operator commands for Midtrans sandbox: a capability check per method (E08-01)
 // and a reconciliation pass against the provider and the ledger (E08-04).
@@ -36,6 +37,7 @@ func runPayments(ctx context.Context, args []string) error {
 	provider := payment.NewMidtrans(key, "sandbox")
 	provider.ClientKey = os.Getenv("MIDTRANS_CLIENT_KEY")
 	store := payment.Store{DB: pool, Provider: provider}
+	fundStore := funds.Store{DB: pool, Provider: provider}
 	if err := store.Ready(ctx); err != nil {
 		return fmt.Errorf("payment schema unavailable; run migrate: %w", err)
 	}
@@ -65,6 +67,15 @@ func runPayments(ctx context.Context, args []string) error {
 			return fmt.Errorf("%d method(s) rejected by Midtrans; disable them in payment_methods or activate the channel", failed)
 		}
 		return nil
+	case "process":
+		// Closes provider transactions of cancelled bookings and sends refunds. Safe to run on a timer.
+		if err := fundStore.Ready(ctx); err != nil {
+			return fmt.Errorf("funds schema unavailable; run migrate and apply runtime grants: %w", err)
+		}
+		report, err := fundStore.Process(ctx)
+		out, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(out))
+		return err
 	case "reconcile":
 		report, err := store.Reconcile(ctx, 2*time.Minute, 500)
 		if err != nil {
