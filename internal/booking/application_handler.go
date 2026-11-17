@@ -86,7 +86,7 @@ func (s Store) ApplicationRoutes(api *gin.RouterGroup, sessions *auth.Service, o
 		}
 		c.JSON(http.StatusOK, gin.H{"data": result, "meta": gin.H{}})
 	}))
-	api.GET("/events/:id/registration-mode", guard, sessions.WithAccount(func(c *gin.Context, account auth.Account) {
+	api.GET("/events/:id/registration-mode", sessions.WithAccount(func(c *gin.Context, account auth.Account) {
 		mode, err := s.RegistrationMode(c.Request.Context(), account.ID, c.Param("id"))
 		if err != nil {
 			writeApplicationError(c, err)
