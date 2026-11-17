@@ -344,7 +344,23 @@ func TestEventPlanPurchase(t *testing.T) {
 			'Asia/Jakarta', 'Banda Aceh', 'St', 'T') RETURNING id`, org, owner, slug)
 	}
 
+	custom := newEvent("custom")
+	capacity := 120
+	customInput := PlanInput{PlanCode: "custom", Method: "snap", CapacityStands: &capacity}
+	customCheckout, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", custom, "custom-1", customInput)
+	if err != nil || customCheckout.Purchase.CapacityStands == nil || *customCheckout.Purchase.CapacityStands != capacity ||
+		customCheckout.Purchase.Amount != 700000 || customCheckout.Payment == nil || customCheckout.Payment.Amount != 700000 {
+		t.Fatalf("custom price or capacity: %+v, %v", customCheckout, err)
+	}
+	capacity++
+	if _, _, err := s.PurchasePlan(ctx, owner, "owner@example.com", custom, "custom-1", customInput); !errors.Is(err, ErrIdempotencyMismatch) {
+		t.Fatalf("custom capacity must be part of the idempotency key: %v", err)
+	}
+
 	// A free plan activates at once and creates no payment.
+	if _, err := s.DB.Exec(ctx, `UPDATE event_plans SET active = true WHERE code = 'standard'`); err != nil {
+		t.Fatal(err)
+	}
 	free := newEvent("free")
 	got, created, err := s.PurchasePlan(ctx, owner, "owner@example.com", free, "free-1", PlanInput{PlanCode: "standard"})
 	if err != nil || !created || got.Purchase.Status != "active" || got.Payment != nil {
@@ -354,7 +370,7 @@ func TestEventPlanPurchase(t *testing.T) {
 	if err != nil || created || again.Purchase.ID != got.Purchase.ID {
 		t.Fatalf("second purchase should report the active plan: %+v created=%v err=%v", again, created, err)
 	}
-	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts`) != 0 {
+	if count(t, ctx, s, `SELECT count(*) FROM payment_attempts WHERE purchase_id = $1`, got.Purchase.ID) != 0 {
 		t.Fatal("free plan must not open a payment")
 	}
 	if state, err := s.PlanStatus(ctx, member, free); err != nil || !state.Active {

@@ -5137,6 +5137,7 @@ components:
       required: [plan_code]
       properties:
         plan_code: {type: string, minLength: 1}
+        capacity_stands: {type: integer, minimum: 101, maximum: 500, description: Wajib khusus paket Custom. Tambahan Rp5000 per stand di atas 100.}
         method: {type: string, enum: [snap], description: Wajib untuk paket berbayar.}
     PlanCheckout:
       type: object

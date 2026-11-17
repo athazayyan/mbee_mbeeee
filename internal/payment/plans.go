@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,8 +55,9 @@ type PlanCheckout struct {
 }
 
 type PlanInput struct {
-	PlanCode string `json:"plan_code"`
-	Method   string `json:"method"`
+	PlanCode       string `json:"plan_code"`
+	Method         string `json:"method"`
+	CapacityStands *int   `json:"capacity_stands,omitempty"`
 }
 
 const purchaseColumns = `p.id, p.event_id, p.plan_code, p.status, p.amount, p.capacity_stands, p.activated_at`
@@ -128,6 +130,14 @@ func (s Store) PurchasePlan(ctx context.Context, actor, email, eventID, key stri
 		return PlanCheckout{}, false, pgx.ErrNoRows
 	}
 	digest := sha256.Sum256([]byte("plan\x00" + eventID + "\x00" + input.PlanCode + "\x00" + input.Method))
+	if input.PlanCode == "custom" {
+		if input.CapacityStands == nil || *input.CapacityStands < 101 || *input.CapacityStands > 500 {
+			return PlanCheckout{}, false, ErrPlanUnknown
+		}
+		digest = sha256.Sum256(strconv.AppendInt(append(digest[:], 0), int64(*input.CapacityStands), 10))
+	} else if input.CapacityStands != nil {
+		return PlanCheckout{}, false, ErrPlanUnknown
+	}
 	var result PlanCheckout
 	var created bool
 	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) error {
@@ -186,6 +196,10 @@ func (s Store) PurchasePlan(ctx context.Context, actor, email, eventID, key stri
 		} else if err != nil {
 			return err
 		}
+		if input.PlanCode == "custom" {
+			capacity = input.CapacityStands
+			price += int64(*capacity-100) * 5000
+		}
 
 		purchase, err := scanPurchase(tx.QueryRow(ctx, `SELECT `+purchaseColumns+` FROM event_plan_purchases p
 			WHERE p.event_id = $1 AND p.status = 'pending' FOR UPDATE`, eventID))
@@ -193,7 +207,8 @@ func (s Store) PurchasePlan(ctx context.Context, actor, email, eventID, key stri
 			purchase, err = scanPurchase(tx.QueryRow(ctx, `INSERT INTO event_plan_purchases AS p
 				(event_id, plan_code, purchased_by, amount, capacity_stands) VALUES ($1, $2, $3, $4, $5)
 				RETURNING `+purchaseColumns, eventID, input.PlanCode, actor, price, capacity))
-		} else if err == nil && purchase.PlanCode != input.PlanCode {
+		} else if err == nil && (purchase.PlanCode != input.PlanCode ||
+			(input.PlanCode == "custom" && (purchase.CapacityStands == nil || *purchase.CapacityStands != *capacity))) {
 			var live int
 			if err := tx.QueryRow(ctx, `SELECT count(*) FROM payment_attempts WHERE purchase_id = $1
 				AND status IN ('created', 'pending')`, purchase.ID).Scan(&live); err != nil {
