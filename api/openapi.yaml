@@ -4923,6 +4923,8 @@ components:
       - type: object
         properties:
           effective_at: {type: string, format: date-time}
+          quota_override_reason: {type: string, minLength: 1, maxLength: 500, description: Wajib saat admin platform yang memiliki acara mengubah kuota acara terbit.}
+          quota_base_version: {type: string, minLength: 1, description: Versi harga yang berlaku pada waktu override.}
     PricingVersion:
       type: object
       required: [event_id, price_version, effective_at, rules]
@@ -4943,6 +4945,7 @@ components:
       type: object
       required: [slots, active, latest]
       properties:
+        can_override_quotas: {type: boolean, description: Pemilik acara juga memiliki izin admin platform.}
         slots: {type: array, items: {$ref: '#/components/schemas/PricingSlot'}}
         inventory:
           type: object

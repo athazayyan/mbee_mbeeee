@@ -38,6 +38,8 @@ GRANT USAGE ON SCHEMA public TO :"api_role", :"worker_role";
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM :"api_role", :"worker_role";
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"api_role", :"worker_role";
 -- Table-level revokes do not remove column grants from a previous deployment.
+REVOKE INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id)
+    ON public.admin_audit FROM :"api_role";
 REVOKE SELECT (id, amount, booking_id, purchase_id, status, cancellation_checked_at, rent_amount, platform_fee_amount, provider_fee_amount),
     UPDATE (cancellation_checked_at, status, paid_at, updated_at) ON public.payment_attempts FROM :"worker_role";
 REVOKE SELECT (id, provider, dedupe_key), INSERT (provider, dedupe_key, provider_status, outcome, payload),
@@ -126,6 +128,9 @@ GRANT INSERT (organization_id, created_by, name, slug, starts_at, ends_at, timez
 GRANT INSERT (event_id, code, starts_at, ends_at), UPDATE (starts_at, ends_at) ON public.event_slots TO :"api_role";
 GRANT INSERT (event_id, actor_id, from_status, to_status, reason) ON public.event_status_history TO :"api_role";
 GRANT INSERT (event_id, revision, created_by, rules, effective_at) ON public.event_pricing_versions TO :"api_role";
+GRANT SELECT ON public.platform_admins TO :"api_role";
+GRANT INSERT (actor_id, action, resource_type, resource_id, reason, before, after, request_id)
+    ON public.admin_audit TO :"api_role";
 GRANT INSERT (organization_id, reported_by, name, starts_at, ends_at, timezone, city, address, idempotency_key)
     ON public.organization_event_history TO :"api_role";
 GRANT SELECT ON public.event_plans, public.event_plan_purchases TO :"api_role";
