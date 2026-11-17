@@ -4922,7 +4922,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         default: {$ref: '#/components/responses/Error'}
-  /plans:
+  /plans/catalog:
     get:
       tags: [Admin]
       operationId: listEventPlans

@@ -19,7 +19,7 @@ type Store struct {
 var errForbidden = errors.New("platform admin required")
 
 func (s Store) Ready(ctx context.Context) error {
-	_, err := s.DB.Exec(ctx, `SELECT 1 FROM platform_admins, admin_audit, event_plan_versions, event_plans LIMIT 0`)
+	_, err := s.DB.Exec(ctx, `SELECT 1 FROM platform_admins, admin_audit, plan_price_versions, plan_prices LIMIT 0`)
 	return err
 }
 
@@ -231,13 +231,13 @@ func (s Store) audit(ctx context.Context, filter pageFilter) ([]AuditEvent, erro
 // planCatalog membaca versi paket yang berlaku sekarang.
 func (s Store) planCatalog(ctx context.Context) (PlanCatalog, error) {
 	var catalog PlanCatalog
-	err := s.DB.QueryRow(ctx, `SELECT id, effective_at, custom_price_per_tenant FROM event_plan_versions
+	err := s.DB.QueryRow(ctx, `SELECT id, effective_at, custom_price_per_tenant FROM plan_price_versions
 		WHERE effective_at <= now() ORDER BY effective_at DESC LIMIT 1`).
 		Scan(&catalog.VersionID, &catalog.EffectiveAt, &catalog.CustomPricePerTenant)
 	if err != nil {
 		return catalog, err
 	}
-	rows, err := s.DB.Query(ctx, `SELECT code, name, capacity, price FROM event_plans
+	rows, err := s.DB.Query(ctx, `SELECT code, name, capacity, price FROM plan_prices
 		WHERE version_id = $1 ORDER BY capacity`, catalog.VersionID)
 	if err != nil {
 		return catalog, err

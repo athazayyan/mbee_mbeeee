@@ -15,7 +15,7 @@ import (
 const maxInput = 4 << 10
 
 func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin string) {
-	api.GET("/plans", s.listPlans)
+	api.GET("/plans/catalog", s.listPlans)
 	api.GET("/plans/quote", s.quote)
 	api.GET("/admin/overview", sessions.WithAccount(s.withAdmin(s.getOverview)))
 	api.GET("/admin/organizations", sessions.WithAccount(s.withAdmin(s.listOrganizations)))
