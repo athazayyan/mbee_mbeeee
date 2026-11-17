@@ -81,7 +81,7 @@ func newTokenFixture(t *testing.T) (*Service, *pgxpool.Pool, *captureMailer, con
 func registerFixture(t *testing.T, s *Service, pool *pgxpool.Pool, ctx context.Context, password string) Account {
 	t.Helper()
 	email := strings.ToLower(rand.Text()) + "@example.com"
-	account, err := s.register(ctx, email, password)
+	account, err := s.register(ctx, email, password, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

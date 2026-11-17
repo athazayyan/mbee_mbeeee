@@ -50,7 +50,7 @@ type consentEvent struct {
 
 func (s Store) Ready(ctx context.Context) error {
 	_, err := s.DB.Exec(ctx, `
-		SELECT 1 FROM memberships, businesses, organizations, business_categories, consent_events LIMIT 0
+		SELECT 1 FROM memberships, businesses, organizations, business_categories, consent_events, signup_profiles LIMIT 0
 	`)
 	return err
 }
@@ -64,6 +64,15 @@ func (s Store) memberships(ctx context.Context, userID string) ([]membership, er
 		JOIN organizations o ON o.id = m.organization_id WHERE m.user_id = $1
 		ORDER BY 1, 3, 2`, userID)
 	return collect(rows, err, pgx.RowToStructByPos[membership])
+}
+
+// signup returns the phone and planned first event name given at registration, if any.
+func (s Store) signup(ctx context.Context, userID string) (phone, eventName *string, err error) {
+	err = s.DB.QueryRow(ctx, `SELECT phone, event_name FROM signup_profiles WHERE user_id = $1`, userID).Scan(&phone, &eventName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	return phone, eventName, err
 }
 
 func (s Store) categories(ctx context.Context) ([]category, error) {

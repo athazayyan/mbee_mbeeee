@@ -102,12 +102,12 @@ func (s *Service) hashRefresh(token string) []byte {
 	return mac.Sum(nil)
 }
 
-func (s *Service) register(ctx context.Context, email, password string) (Account, error) {
+func (s *Service) register(ctx context.Context, email, password string, signup *Signup) (Account, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return Account{}, err
 	}
-	account, err := s.store.createAccount(ctx, email, hash)
+	account, err := s.store.createAccount(ctx, email, hash, signup)
 	if err != nil {
 		return Account{}, err
 	}

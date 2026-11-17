@@ -99,6 +99,8 @@ GRANT INSERT (id, event_id, block_id, code, x, y, width, height, rotation, categ
 GRANT INSERT (event_id, revision, actor_id, snapshot) ON public.event_layout_revisions TO :"api_role";
 GRANT SELECT (id) ON public.booking_status_history TO :"api_role";
 GRANT INSERT (email, password_hash) ON public.users TO :"api_role";
+GRANT SELECT ON public.signup_profiles TO :"api_role";
+GRANT INSERT (user_id, role, phone, event_name) ON public.signup_profiles TO :"api_role";
 GRANT INSERT (user_id, expires_at), UPDATE (revoked_at) ON public.sessions TO :"api_role";
 GRANT INSERT (session_id, token_hash), UPDATE (used_at) ON public.session_refresh_tokens TO :"api_role";
 GRANT INSERT (owner_id, name, category_id), UPDATE (name, category_id) ON public.businesses TO :"api_role";

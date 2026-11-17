@@ -14,6 +14,8 @@ import (
 var (
 	errConflict = errors.New("account already exists")
 	errSession  = errors.New("invalid session")
+	// errBadCategory means the chosen business category does not exist.
+	errBadCategory = errors.New("unknown business category")
 )
 
 type Account struct {
@@ -25,12 +27,24 @@ type repository struct {
 	db *pgxpool.Pool
 }
 
-func (r repository) createAccount(ctx context.Context, email string, hash []byte) (Account, error) {
+func (r repository) createAccount(ctx context.Context, email string, hash []byte, signup *Signup) (Account, error) {
 	account := Account{Email: email}
-	err := r.db.QueryRow(ctx, "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id", email, hash).Scan(&account.ID)
+	err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id", email, hash).
+			Scan(&account.ID); err != nil {
+			return err
+		}
+		if signup == nil {
+			return nil
+		}
+		return signup.store(ctx, tx, account.ID)
+	})
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		return Account{}, errConflict
+	case errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "businesses_category_id_fkey":
+		return Account{}, errBadCategory
 	}
 	return account, err
 }

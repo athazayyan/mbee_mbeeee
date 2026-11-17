@@ -39,11 +39,18 @@ func (s Store) Routes(api *gin.RouterGroup, sessions *auth.Service, origin strin
 type accountProfile struct {
 	auth.Account
 	Memberships []membership `json:"memberships"`
+	// Phone and PlannedEventName come from the registration form and are absent for older accounts.
+	Phone            *string `json:"phone,omitempty"`
+	PlannedEventName *string `json:"planned_event_name,omitempty"`
 }
 
 func (s Store) me(c *gin.Context, account auth.Account) {
-	memberships, err := s.memberships(c.Request.Context(), account.ID)
-	writeResult(c, http.StatusOK, accountProfile{Account: account, Memberships: memberships}, err)
+	profile := accountProfile{Account: account}
+	var err error
+	if profile.Memberships, err = s.memberships(c.Request.Context(), account.ID); err == nil {
+		profile.Phone, profile.PlannedEventName, err = s.signup(c.Request.Context(), account.ID)
+	}
+	writeResult(c, http.StatusOK, profile, err)
 }
 
 func (s Store) listPublicCategories(c *gin.Context) {
