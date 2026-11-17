@@ -114,7 +114,7 @@ func (s Store) resolve(ctx context.Context, actor, id, action, reason, requestID
 				return err
 			}
 			before = map[string]any{"hidden": false, "open_reports": tag.RowsAffected()}
-			after = map[string]any{"hidden": true, "report_id": id}
+			after = map[string]any{"hidden": true, "open_reports": 0, "report_id": id}
 		} else if _, err := tx.Exec(ctx, `UPDATE message_reports SET status = 'dismissed', resolved_at = clock_timestamp(),
 			resolved_by = $2 WHERE id = $1`, id, actor); err != nil {
 			return err
